@@ -19,14 +19,22 @@ on:
         description: "Tag do repo de código a deployar (ex.: v1.0.0)"
         required: true
 
+# Dois deploys de prod simultaneos deixariam metade dos jobs numa tag e
+# metade noutra. Nao cancela o que ja esta rodando: um deploy pela metade e
+# pior que um deploy velho.
+concurrency:
+  group: deploy-prd
+  cancel-in-progress: false
+
 env:
   CODE_REPO: scudellerlemos/pipeline-databricks-mtg-dev
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # Environment separado do de dev: outros secrets, e e onde mora a
-    # aprovacao manual se voce quiser exigir uma antes de tocar producao.
+    # Environment separado do de dev: outros secrets, e e onde mora o portao
+    # de aprovacao manual (required reviewer). O dispatch da tag chega aqui e
+    # PARA ate alguem aprovar - nada toca o mtg_prod antes disso.
     environment: Databricks-Prod
 
     steps:
@@ -40,12 +48,16 @@ jobs:
           repository: ${{ env.CODE_REPO }}
           ref: ${{ steps.alvo.outputs.tag }}
 
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.11'
 
       - name: Instalar dependências
-        run: pip install databricks-cli pyyaml pytest ruff
+        run: pip install pyyaml==6.0.2 pytest==8.3.3 ruff==0.6.9
+
+      # CLI nova (binario Go) pinada na mesma versao do repo de codigo.
+      - name: Instalar Databricks CLI
+        uses: databricks/setup-cli@v1.16.1
 
       # A tag ja passou no CI do repo de codigo, mas producao revalida: a tag
       # pode ter sido criada num commit que nunca virou PR.
@@ -64,6 +76,9 @@ jobs:
           MTG_GIT_URL: "https://github.com/${{ env.CODE_REPO }}"
           MTG_GIT_TAG: ${{ steps.alvo.outputs.tag }}
           MTG_PAUSE_STATUS: "UNPAUSED"
+          # Destino do on_failure injetado em todo job. Sem isso a run mensal
+          # de producao falha as 6h da segunda e ninguem fica sabendo.
+          MTG_ALERT_EMAIL: ${{ vars.MTG_ALERT_EMAIL }}
           # Config do ambiente: o deploy.py injeta tudo que comeca com MTG_ e
           # nao e knob em spark_env_vars, e get_secret() no notebook resolve
           # env var > secret > default. Por isso NAO existe scope de prd: o
@@ -79,6 +94,22 @@ jobs:
           MTG_S3_BUCKET: "s3://magicthegatheringdev/prd"
         run: python .github/scripts/deploy.py
 
+      # O passo que faltava: sobe um cluster com a config de prd, confere que
+      # MTG_CATALOG_NAME chegou de verdade no spark_env_vars, grava e le no
+      # mtg_prod e cria os schemas do medalhao. Ate existir, "producao
+      # deployada" queria dizer so "as settings do job estao certas".
+      - name: Smoke test em produção
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          MTG_JOB_SUFFIX: "_PRD"
+          MTG_GIT_URL: "https://github.com/${{ env.CODE_REPO }}"
+          MTG_GIT_TAG: ${{ steps.alvo.outputs.tag }}
+          MTG_ENVIRONMENT: "production"
+          MTG_CATALOG_NAME: "mtg_prod"
+          MTG_S3_BUCKET: "s3://magicthegatheringdev/prd"
+        run: python .github/scripts/smoke.py
+
       - name: Resumo
         run: |
           {
@@ -88,4 +119,6 @@ jobs:
             echo "- Código: \`${{ env.CODE_REPO }}\`"
             echo "- Jobs: MTG_STAGE_PRD, MTG_BRONZE_PRD, MTG_SILVER_PRD, MTG_GOLD_PRD, MTG_PIPELINE_PRD"
             echo "- Catálogo: \`mtg_prod\` · S3 \`s3://magicthegatheringdev/prd\`"
+            echo "- Smoke test: cluster subiu e gravou no \`mtg_prod\`"
+            echo "- Alerta de falha: \`${MTG_ALERT_EMAIL:-NÃO CONFIGURADO}\`"
           } >> "$GITHUB_STEP_SUMMARY"
