@@ -71,12 +71,12 @@ jobs:
           # (bucket, URL da API, retries) e o que difere esta aqui, versionado.
           MTG_ENVIRONMENT: "production"
           MTG_CATALOG_NAME: "mtg_prod"
-          # dev e prd dividem o bucket - sem prefixo proprio os dois gravariam
-          # no mesmo caminho S3, catalogo diferente ou nao.
-          MTG_S3_STAGE_PREFIX: "prod/stage"
-          MTG_S3_BRONZE_PREFIX: "prod/bronze"
-          MTG_S3_SILVER_PREFIX: "prod/silver"
-          MTG_S3_GOLD_PREFIX: "prod/gold"
+          # O ambiente ja esta no bucket, nao nos prefixos: dev grava em
+          # s3://magicthegatheringdev/dev/{stage,bronze,silver,gold} e o
+          # storage root do mtg_prod e .../prd, coberto pela external location
+          # mtg-uc-location-prd. Trocar so o bucket mantem os prefixos iguais
+          # nos dois ambientes e cai dentro do que o UC concedeu.
+          MTG_S3_BUCKET: "s3://magicthegatheringdev/prd"
         run: python .github/scripts/deploy.py
 
       - name: Resumo
@@ -87,5 +87,5 @@ jobs:
             echo "- Tag: \`${{ steps.alvo.outputs.tag }}\`"
             echo "- Código: \`${{ env.CODE_REPO }}\`"
             echo "- Jobs: MTG_STAGE_PRD, MTG_BRONZE_PRD, MTG_SILVER_PRD, MTG_GOLD_PRD, MTG_PIPELINE_PRD"
-            echo "- Catálogo: \`mtg_prod\` · prefixos S3 \`prod/*\`"
+            echo "- Catálogo: \`mtg_prod\` · S3 \`s3://magicthegatheringdev/prd\`"
           } >> "$GITHUB_STEP_SUMMARY"
