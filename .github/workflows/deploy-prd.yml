@@ -1,0 +1,91 @@
+name: Deploy produção (MTG)
+
+# ATENCAO: este arquivo NAO roda neste repo. Ele e o conteudo do unico arquivo
+# do repo de controle de producao (pipeline-databricks-mtg-prd), onde vive como
+# .github/workflows/deploy-prd.yml. A copia fica versionada aqui porque o
+# desenho dos jobs de prod tem que passar pela mesma revisao que o codigo.
+#
+# O repo de controle nao guarda copia de src/ nem dos DAGs: ele faz checkout
+# DESTE repo na tag promovida e roda o mesmo deploy.py. Assim nao existe
+# segunda copia do pipeline pra divergir da primeira.
+
+on:
+  repository_dispatch:
+    types: [deploy-prd]
+  # Redeployar uma tag antiga por aqui e o rollback.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag do repo de código a deployar (ex.: v1.0.0)"
+        required: true
+
+env:
+  CODE_REPO: scudellerlemos/pipeline-databricks-mtg-dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Environment separado do de dev: outros secrets, e e onde mora a
+    # aprovacao manual se voce quiser exigir uma antes de tocar producao.
+    environment: Databricks-Prod
+
+    steps:
+      - name: Resolver a tag alvo
+        id: alvo
+        run: echo "tag=${{ github.event.client_payload.tag || inputs.tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout do código na tag promovida
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CODE_REPO }}
+          ref: ${{ steps.alvo.outputs.tag }}
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Instalar dependências
+        run: pip install databricks-cli pyyaml pytest ruff
+
+      # A tag ja passou no CI do repo de codigo, mas producao revalida: a tag
+      # pode ter sido criada num commit que nunca virou PR.
+      - name: Revalidar o código promovido
+        run: |
+          python .github/scripts/validate_dag.py
+          python .github/scripts/lint_notebooks.py
+          python -m pytest src .github/scripts -q
+
+      - name: Deploy dos jobs de produção
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          # Knobs do deploy: mexem no job, nao chegam no cluster.
+          MTG_JOB_SUFFIX: "_PRD"
+          MTG_GIT_URL: "https://github.com/${{ env.CODE_REPO }}"
+          MTG_GIT_TAG: ${{ steps.alvo.outputs.tag }}
+          MTG_PAUSE_STATUS: "UNPAUSED"
+          # Config do ambiente: o deploy.py injeta tudo que comeca com MTG_ e
+          # nao e knob em spark_env_vars, e get_secret() no notebook resolve
+          # env var > secret > default. Por isso NAO existe scope de prd: o
+          # scope "mtg-pipeline" guarda o que e igual nos dois ambientes
+          # (bucket, URL da API, retries) e o que difere esta aqui, versionado.
+          MTG_ENVIRONMENT: "production"
+          MTG_CATALOG_NAME: "mtg_prod"
+          # dev e prd dividem o bucket - sem prefixo proprio os dois gravariam
+          # no mesmo caminho S3, catalogo diferente ou nao.
+          MTG_S3_STAGE_PREFIX: "prod/stage"
+          MTG_S3_BRONZE_PREFIX: "prod/bronze"
+          MTG_S3_SILVER_PREFIX: "prod/silver"
+          MTG_S3_GOLD_PREFIX: "prod/gold"
+        run: python .github/scripts/deploy.py
+
+      - name: Resumo
+        run: |
+          {
+            echo "## Produção atualizada"
+            echo ""
+            echo "- Tag: \`${{ steps.alvo.outputs.tag }}\`"
+            echo "- Código: \`${{ env.CODE_REPO }}\`"
+            echo "- Jobs: MTG_STAGE_PRD, MTG_BRONZE_PRD, MTG_SILVER_PRD, MTG_GOLD_PRD, MTG_PIPELINE_PRD"
+            echo "- Catálogo: \`mtg_prod\` · prefixos S3 \`prod/*\`"
+          } >> "$GITHUB_STEP_SUMMARY"
