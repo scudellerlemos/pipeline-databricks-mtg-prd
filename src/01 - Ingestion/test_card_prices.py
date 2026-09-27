@@ -1,10 +1,5 @@
-# ponytail: fetch_price_records/_to_price_record vivem dentro da célula
-# "FUNÇÕES ESPECÍFICAS" do notebook (não é um módulo importável por si só),
-# então isto carrega o código-fonte da célula direto do notebook .py e
-# executa com um `requests` fake (índice de bulk-data + payload jsonl
-# gzipado) - mesmo espírito de "exercitar o código real" de
-# test_base_utils_get_secret.py, só que pra uma célula de notebook em vez de
-# um módulo .py.
+# O notebook não é importável: carrega o código da célula "FUNÇÕES ESPECÍFICAS"
+# e executa com um `requests` fake (índice de bulk-data + jsonl gzipado).
 
 import gzip
 import json
@@ -88,10 +83,7 @@ def test_fetch_price_records_maps_fields():
 
 
 def test_double_faced_card_keeps_combined_name_as_is():
-    # issue #<readequacao>: landing zone não tenta mais casar por nome com os
-    # arquivos de `cards` (isso é join, fica pra Gold) - o nome
-    # combinado "A // B" que a Scryfall devolve pra cartas de dupla face é
-    # gravado como veio, sem indexar por cada face separadamente.
+    # Nome combinado "A // B" é gravado como veio; join com cards fica na Gold.
     cards = [{
         "name": "Brightglass Gearhulk // Brightglass Gearhulk", "set": "eoe", "rarity": "mythic",
         "released_at": "2025-07-25",
@@ -110,10 +102,7 @@ def test_double_faced_card_keeps_combined_name_as_is():
 
 
 def test_reimpressoes_do_mesmo_nome_viram_linhas_com_precos_proprios():
-    # O motivo de trocar oracle_cards -> default_cards: em Magic o preco varia
-    # por impressao (o Lightning Bolt tem 70 delas, de ~0,74 a centenas de USD).
-    # oracle_cards colapsava tudo num objeto so e devolvia o preco de uma
-    # impressao arbitraria como se fosse "o preco da carta".
+    # O preco varia por impressao, entao cada impressao vira uma linha.
     cards = [
         {"id": "bolt-lea", "name": "Lightning Bolt", "set": "lea",
          "released_at": "1993-08-05", "prices": {"usd": "412.00"}},
@@ -126,14 +115,12 @@ def test_reimpressoes_do_mesmo_nome_viram_linhas_com_precos_proprios():
 
     assert [r["id"] for r in records] == ["bolt-lea", "bolt-sos"]
     assert [r["usd"] for r in records] == ["412.00", "1.35"]
-    # mesmo nome nas duas - e por isso que a chave de join deixou de ser o nome
+    # mesmo nome nas duas - por isso a chave de join e o id, nao o nome
     assert len({r["name"] for r in records}) == 1
 
 
 def test_variantes_foil_sao_capturadas_separadamente():
-    # Foil e outra cotação da MESMA impressao, nao outra impressao - chega a
-    # valer multiplos do nao-foil (Lightning Bolt em msc: 0.74 vs 3.73).
-    # Capturar so `usd` exibia uma variante como se fosse o preco da impressao.
+    # Foil e outra cotacao da mesma impressao, com valor bem diferente do nao-foil.
     cards = [{"id": "bolt-msc", "name": "Lightning Bolt", "set": "msc",
               "released_at": "2026-06-26",
               "prices": {"usd": "0.74", "usd_foil": "3.73", "tix": "0.02"}}]

@@ -2,10 +2,7 @@
 """
 Validacao estrutural dos jobs Databricks definidos em .github/DAGs/*.yml.
 
-Cada job vira seu proprio job no Databricks (nao usamos Databricks Asset
-Bundles, entao nao ha 1 job por bundle - ha varios arquivos, cada um com um
-job debaixo de resources.jobs). Este script generaliza os checks que antes
-viviam hardcoded pra um unico arquivo/job (magic.yml / MTG_PIPELINE).
+Cada arquivo tem um job em resources.jobs, deployado como job separado.
 """
 
 import json

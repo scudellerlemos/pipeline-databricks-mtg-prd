@@ -1,8 +1,5 @@
-# ponytail: apply_target e o unico ponto onde dev e prd se diferenciam. Os
-# YAMLs sao identicos pros dois alvos de proposito (o repo de prd recebe uma
-# copia deste codigo e roda o mesmo deploy.py na tag), entao se esta funcao errar o
-# job de producao sobe apontando pro catalogo de desenvolvimento e grava
-# em cima de mtg_dev sem ninguem perceber.
+# Testes do apply_target, unico ponto onde dev e prd se diferenciam (os YAMLs
+# sao os mesmos). Se ele errar, o job de prd grava no catalogo mtg_dev.
 
 import copy
 import importlib.util
@@ -47,11 +44,9 @@ JOB_BASE = {
 
 
 def _deploy_com_env(env):
-    """Recarrega deploy.py com um ambiente - TARGET e lido no import.
+    """Recarrega deploy.py com o ambiente dado (TARGET e lido no import).
 
-    Limpa TODA env var MTG_* antes, nao so as do alvo: o
-    CONFIG_DO_AMBIENTE varre o prefixo inteiro, entao uma MTG_* solta na
-    maquina de quem roda o teste vazaria pro spark_env_vars.
+    Limpa todas as MTG_* antes, porque CONFIG_DO_AMBIENTE pega qualquer MTG_* da maquina.
     """
     antigo = {k: v for k, v in os.environ.items() if k.startswith("MTG_")}
     for k in antigo:
@@ -90,16 +85,14 @@ def test_alvo_prd_renomeia_e_injeta_a_config():
     env_vars = job["job_clusters"][0]["new_cluster"]["spark_env_vars"]
     assert env_vars["MTG_CATALOG_NAME"] == "mtg_prod"
     assert env_vars["MTG_S3_STAGE_PREFIX"] == "prod/stage"
-    # arma a trava de catalogo do get_secret no cluster
+    # ativa a trava de catalogo do get_secret no cluster
     assert env_vars["MTG_ENVIRONMENT"] == "production"
-    # injetar nao pode comer o que ja estava no cluster
+    # preserva as env vars que ja estavam no cluster
     assert env_vars["PYSPARK_PYTHON"] == "/databricks/python3/bin/python3"
     assert job["tags"]["environment"] == "production"
 
 
 def test_knobs_do_deploy_nao_vazam_pro_cluster():
-    # git_tag e sufixo de nome mexem no JOB. Mandar pro cluster so polui o
-    # ambiente do notebook com coisa que ele nunca le.
     deploy = _deploy_com_env(ALVO_PRD)
     job = deploy.apply_target(copy.deepcopy(JOB_BASE))
 
@@ -109,8 +102,7 @@ def test_knobs_do_deploy_nao_vazam_pro_cluster():
 
 
 def test_tag_substitui_branch_e_nunca_convivem():
-    # git_source aceita branch OU tag - mandar os dois e erro 400 da API, e
-    # producao tem que rodar um ref imutavel, nao uma branch que anda sozinha.
+    # git_source aceita branch OU tag (os dois = erro 400 da API).
     deploy = _deploy_com_env(ALVO_PRD)
     job = deploy.apply_target(copy.deepcopy(JOB_BASE))
 
@@ -119,8 +111,6 @@ def test_tag_substitui_branch_e_nunca_convivem():
 
 
 def test_pause_status_do_alvo_vence_o_yaml():
-    # jobs reset sobrescreve as settings inteiras, entao pausar o schedule de
-    # dev pela UI nao sobrevive ao proximo deploy - so o knob de alvo segura.
     deploy = _deploy_com_env({**ALVO_PRD, "MTG_PAUSE_STATUS": "PAUSED"})
     job = deploy.apply_target(copy.deepcopy(JOB_BASE))
 
@@ -137,24 +127,22 @@ def test_orquestrador_sem_cluster_e_sem_git_nao_quebra():
 
 
 # ---------------------------------------------------------------------------
-# campos_criticos / diferencas - usados nos DOIS sentidos: antes do reset pra
-# dizer o que esta sendo sobrescrito, e depois pra conferir que chegou.
+# campos_criticos / diferencas: usados antes do reset (o que vai ser
+# sobrescrito) e depois (conferir o que chegou).
 # ---------------------------------------------------------------------------
 
 
 def test_alerta_de_falha_e_injetado_em_todo_job():
-    # a run agendada e mensal e ninguem olha o workspace. Job sem on_failure
-    # significa que uma falha as 6h da primeira segunda so aparece em outubro.
     deploy = _deploy_com_env(ALVO_PRD)
     job = deploy.apply_target(copy.deepcopy(JOB_BASE))
 
     assert job["email_notifications"]["on_failure"] == ["alerta@exemplo.com"]
-    # o knob nao pode virar env var do cluster - o notebook nunca le isso
+    # knob do deploy, nao vai pro cluster
     assert "MTG_ALERT_EMAIL" not in job["job_clusters"][0]["new_cluster"]["spark_env_vars"]
 
 
 def test_sem_MTG_ALERT_EMAIL_o_job_sobe_sem_bloco_de_email():
-    # mandar on_failure: [""] pro Databricks e pior que nao mandar nada
+    # evita mandar on_failure: [""] pro Databricks
     deploy = _deploy_com_env({k: v for k, v in ALVO_PRD.items() if k != "MTG_ALERT_EMAIL"})
     job = deploy.apply_target(copy.deepcopy(JOB_BASE))
 
@@ -174,8 +162,7 @@ def test_verificacao_pega_alerta_que_sumiu():
 
 
 def test_verificacao_pega_catalogo_que_nao_chegou_no_cluster():
-    # o modo de falha que mais importa: job de prd sobe, task fica verde e
-    # grava por cima do mtg_dev porque a env var nao chegou no cluster.
+    # sem MTG_CATALOG_NAME no cluster, o job de prd grava no mtg_dev.
     deploy = _deploy_com_env(ALVO_PRD)
     enviado = deploy.apply_target(copy.deepcopy(JOB_BASE))
 
@@ -203,8 +190,8 @@ def test_verificacao_pega_job_que_ficou_na_branch():
 
 
 def test_verificacao_pega_orquestrador_apontando_pra_job_id_velho():
-    # a substituicao de {{MTG_STAGE_JOB_ID}} e feita na mao aqui (sem DAB),
-    # entao um id velho passa sem erro nenhum da API.
+    # os placeholders {{MTG_*_JOB_ID}} sao substituidos pelo deploy.py; a API
+    # aceita um id velho sem erro.
     deploy = _deploy_com_env({})
     enviado = {"name": "MTG_PIPELINE", "tasks": [{"run_job_task": {"job_id": 999}}]}
     lido = {"name": "MTG_PIPELINE", "tasks": [{"run_job_task": {"job_id": 111}}]}
@@ -218,13 +205,11 @@ def test_deploy_identico_nao_acusa_nada():
     deploy = _deploy_com_env(ALVO_PRD)
     enviado = deploy.apply_target(copy.deepcopy(JOB_BASE))
 
-    # a API devolve as settings com defaults que nao mandamos - nao pode virar
-    # divergencia, senao toda verificacao falha.
+    # defaults que a API preenche nao contam como divergencia.
     lido = copy.deepcopy(enviado)
     lido["format"] = "MULTI_TASK"
     lido["timeout_seconds"] = 0
-    # email_notifications NAO entra aqui: desde que o alerta e injetado, um {}
-    # vindo da API significa que o on_failure nao pegou - e divergencia real.
+    # email_notifications fica de fora: com alerta configurado, {} da API e divergencia real.
 
     assert deploy.diferencas(
         deploy.campos_criticos(lido), deploy.campos_criticos(enviado)

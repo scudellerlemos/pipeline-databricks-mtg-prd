@@ -3,77 +3,43 @@
 # CAMADA GOLD - MERCADO DE CARTAS - MAGIC: THE GATHERING
 # =============================================================================
 """
-Script Python para construção da tabela Gold TB_FATO_MERCADO_CARTAS.
-Junta Silver -> Gold: uma única tabela de consumo (analista/BI/Genie) sobre
-mercado de cartas, sem precisar conhecer Bronze/Silver.
+Constrói a tabela Gold TB_FATO_MERCADO_CARTAS: tabela única de consumo
+(analista/BI/Genie) sobre mercado de cartas, montada a partir da Silver.
 
-GRAO: uma linha por cotação de preço de uma impressão de carta
-(ID_CARTA, DT_COTACAO). Chave: (ID_CARTA, DT_COTACAO).
+GRÃO: uma linha por cotação de preço de uma impressão de carta.
+Chave: (ID_CARTA, DT_COTACAO). Cresce ~1x TB_FATO_CARTAS por coleta.
+Esclarecimentos e migrações são agregados antes do join para não haver
+fan-out; chave duplicada faz o save_to_gold abortar antes de gravar.
 
-TAMANHO ESPERADO: ~1 linha por impressão por data de coleta, ou seja
-TB_FATO_CARTAS x número de coletas já acumuladas - a tabela cresce ~1x
-TB_FATO_CARTAS por run. Não há fan-out: carta e preço estão no mesmo grão de
-impressão e cada cotação casa com uma só carta por ID_CARTA. Esclarecimentos e
-migrações são agregados antes do join pelo mesmo motivo; coleções já têm 1
-linha por COD_COLECAO. Se mesmo assim (ID_CARTA, DT_COTACAO) repetir, o
-save_to_gold (gold_utils.py) aborta antes de gravar - duplicata aqui é bug
-a montante, não dado a descartar.
+VLR_USD/EUR/TIX são o preço daquela impressão (reimpressão e original são
+linhas distintas). _FOIL/_ETCHED são outra cotação da mesma impressão, por
+isso são colunas: SUM(VLR_USD) não inclui foil.
 
-VLR_USD/EUR/TIX são o preço DAQUELA impressão, não do nome da carta - uma
-reimpressão barata e um original caro são linhas distintas com valores
-distintos, que é o que torna SUM/AVG por coleção ou raridade legítimo aqui.
-As colunas _FOIL/_ETCHED são outra cotação da MESMA impressão (foil vale
-múltiplos do não-foil), por isso são colunas e não linhas - um SUM(VLR_USD)
-ignora o valor foil da coleção - some VLR_USD_FOIL à parte se quiser ele.
-
-TABELAS SILVER USADAS (5 de 7):
-- TB_FATO_CARTAS (driver): 1 linha por impressão de carta.
-- TB_FATO_PRECOS_CARTAS (INNER JOIN por ID_CARTA): histórico de cotação de
-  preço no mesmo grão de impressão desta tabela, juntável N:1 por ID_CARTA (uma
-  impressão tem N cotações, uma por DT_INGESTAO - ver docstring de
-  TB_FATO_PRECOS_CARTAS.py). INNER porque DT_COTACAO é parte da chave
-  desta tabela Gold - carta sem nenhuma cotação de preço não tem linha
-  possível aqui (não há valor artificial pra DT_COTACAO sem mascarar a
-  chave). Ver seção de Data Quality abaixo para a contagem de cartas
-  excluídas por este motivo.
-- TB_DIM_COLECOES (LEFT JOIN por COD_COLECAO): nome/bloco/data de lançamento
-  da coleção, denormalizados pro consumidor não precisar de um 2º join.
+TABELAS SILVER USADAS:
+- TB_FATO_CARTAS (driver): 1 linha por impressão.
+- TB_FATO_PRECOS_CARTAS (INNER JOIN por ID_CARTA): N cotações por impressão.
+  INNER porque DT_COTACAO é parte da chave; cartas sem cotação ficam de fora
+  (contadas no DQ pré-join).
+- TB_DIM_COLECOES (LEFT JOIN por COD_COLECAO): nome, bloco e data de
+  lançamento da coleção.
 - TB_FATO_ESCLARECIMENTOS_CARTAS (agregada por ID_ORACLE, LEFT JOIN):
-  quantidade e data do esclarecimento de regras mais recente por carta -
-  proxy de o quanto uma carta é discutida/tem regra complexa.
-- TB_MOV_MIGRACOES_CARTAS (agregada por ID_CARTA_ANTIGO, LEFT JOIN em
-  ID_CARTA = ID_CARTA_ANTIGO): resolve se o ID_CARTA desta linha foi
-  substituído pela Scryfall (fusão/remoção) e, se sim, aponta o id vigente -
-  uso documentado na própria origem (docstring de TB_MOV_MIGRACOES_CARTAS.py:
-  "Gold junta por ID_CARTA_ANTIGO/ID_CARTA_CANONICO quando precisar resolver
-  uma migracao"). Agregada ANTES do join (1 linha por ID_CARTA_ANTIGO, mais
-  recente vence por DT_EXECUCAO/ID_MIGRACAO) porque a mesma carta pode ter
-  mais de um evento de migração na Silver - sem agregar, o LEFT JOIN direto
-  faria fan-out e duplicaria linhas da Gold (e o save_to_gold abortaria).
+  quantidade e data do ruling mais recente.
+- TB_MOV_MIGRACOES_CARTAS (agregada por ID_CARTA_ANTIGO, LEFT JOIN): indica se
+  a Scryfall fundiu/removeu o ID_CARTA e qual é o id vigente. Uma carta pode
+  ter vários eventos; vence o mais recente (DT_EXECUCAO, ID_MIGRACAO).
 
-TABELAS SILVER *NÃO* USADAS (2 de 7) - desvio deliberado, documentado:
-- TB_DOM_SIMBOLOS: lista de referência de símbolos de mana individuais
-  (COD_SIMBOLO = 1 símbolo, ex. '[U]'), pra decodificar DESC_CUSTO_MANA
-  (em DESC_CARTA os simbolos basicos ja viraram nomes, ex. [White]; o custo
-  concatena vários símbolos numa string só,
-  ex. '[2][U][U]'). Juntar aqui exigiria explodir DESC_CUSTO_MANA em tokens
-  individuais - muda o grão desta tabela (carta x cotação) para carta x
-  símbolo, o que não serve ao propósito de mercado desta Gold. Tem uso real
-  (decodificar/exibir símbolo de mana), só não neste grão - ver conversa da
-  auditoria pra decisão sobre expor como tabela Gold separada.
-- TB_PONTE_CARTA_SIMBOLOS: já é o custo de mana explodido (carta x símbolo);
-  mesmo motivo - o grão não é carta x cotação.
+TABELAS SILVER NÃO USADAS:
+- TB_DOM_SIMBOLOS e TB_PONTE_CARTA_SIMBOLOS: grão carta x símbolo de mana,
+  juntar aqui mudaria o grão desta tabela.
 
-REGRA DE NULO (GOLD): NME_COLECAO/NME_BLOCO NULOS (carta sem coleção no LEFT
-JOIN; NME_BLOCO também quando a coleção não tem bloco) -> literal 'Nao_Identificado' (nunca 'NA'/vazio/hífen). Os demais
-categóricos vêm da Silver como estão. Medida (VLR_USD/EUR/TIX) NULA continua NULA - 0
-não é válido pra "sem cotação" (mesma semântica já documentada na Silver).
-QTD_ESCLARECIMENTOS NULO -> 0 (zero é valor real: carta nunca teve ruling).
-Data NULA -> sentinela 1001-01-01. PK (ID_CARTA, DT_COTACAO) nunca é
-mascarada - se vier NULA, a run falha em _declare_primary_key (gold_utils.py).
-ID_CARTA_CANONICO nunca é NULO: quando não há migração pro ID_CARTA desta
-linha, o próprio ID_CARTA já é o canônico (COALESCE de fallback, não FK
-mascarada - é a regra de negócio documentada em attach_canonical_id).
+REGRA DE NULO:
+- NME_COLECAO/NME_BLOCO nulos (sem coleção ou sem bloco) -> 'Nao_Identificado'.
+- Demais categóricos vêm da Silver como estão.
+- Preços nulos continuam nulos (0 não significa "sem cotação").
+- QTD_ESCLARECIMENTOS nulo -> 0 (carta nunca teve ruling).
+- Datas nulas -> sentinela 1001-01-01.
+- PK nunca é mascarada: nulo faz a run falhar em _declare_primary_key.
+- ID_CARTA_CANONICO sem migração -> o próprio ID_CARTA.
 """
 
 # =============================================================================
@@ -112,10 +78,7 @@ def setup_logging():
 
 
 def transform_mercado_cartas_gold(df_cartas, df_colecoes, df_precos, df_esclarecimentos, df_migracoes):
-    """
-    Transformação Gold via SQL (spark.sql sobre temp views) - join das 5
-    tabelas Silver descritas na docstring do notebook.
-    """
+    """Join das 5 tabelas Silver (ver docstring do notebook) via spark.sql sobre temp views."""
     logger = logging.getLogger(__name__)
     logger.info("Iniciando join Gold - TB_FATO_MERCADO_CARTAS...")
 
@@ -125,12 +88,9 @@ def transform_mercado_cartas_gold(df_cartas, df_colecoes, df_precos, df_esclarec
     df_esclarecimentos.createOrReplaceTempView("_esclarecimentos")
     df_migracoes.createOrReplaceTempView("_migracoes")
 
-    # DATA QUALITY (pré-join) - as duas exclusões que o INNER JOIN abaixo
-    # causa, contadas antes dele pra não dependerem da tabela final gravada.
-    # Aborta aqui é abortar barato: nada foi escrito ainda.
+    # DATA QUALITY (pré-join): conta o que o INNER JOIN descarta, antes de gravar nada.
     run_data_quality_checks(spark, "pré-join", {
-        # Carta sem NENHUMA cotação (o grão exige DT_COTACAO não nula). Sempre
-        # > 0: toda run traz carta nova antes do preço dela existir.
+        # Carta sem cotação. Sempre > 0: carta nova chega antes do preço dela.
         "cartas_excluidas_sem_cotacao_de_preco": ("""
             SELECT COUNT(DISTINCT c.ID_CARTA)
             FROM _cartas c
@@ -138,17 +98,11 @@ def transform_mercado_cartas_gold(df_cartas, df_colecoes, df_precos, df_esclarec
             WHERE p.ID_CARTA IS NULL
         """, None),
 
-        # Lado espelho: preço de impressão que não está em TB_FATO_CARTAS.
-        # card_prices filtra por releaseDate e cards filtra por código de
-        # coleção (/sets), então token, promo e art series entram no preço e
-        # não na carta. São mantidos de propósito na Silver - cotação é o único
-        # dado não reproduzível do pipeline.
-        #
-        # ponytail: 12000 é tripwire, não especificação. A baseline medida é
-        # 7476 (~12,5% dos preços); o limite existe pra pegar a mudança de
-        # regime - um filtro de coleção que quebrou faria isso saltar pra
-        # dezenas de milhares e a task continuaria verde. Quando estourar por
-        # motivo legítimo (coleção nova grande), mede de novo e sobe o número.
+        # Preço sem carta em TB_FATO_CARTAS (token, promo, art series: os
+        # filtros de preço e de carta são diferentes). Mantidos na Silver:
+        # cotação passada não dá pra recoletar.
+        # Limite 12000 sobre baseline de ~7476: pega filtro de coleção quebrado.
+        # Se estourar por motivo legítimo (coleção nova grande), medir de novo e subir.
         "precos_excluidos_sem_carta": ("""
             SELECT COUNT(DISTINCT p.ID_CARTA)
             FROM _precos p
@@ -167,9 +121,7 @@ def transform_mercado_cartas_gold(df_cartas, df_colecoes, df_precos, df_esclarec
         GROUP BY ID_ORACLE
     """)
 
-    # 1 linha por ID_CARTA_ANTIGO (a carta pode ter mais de 1 evento de
-    # migracao na Silver) - sem isso o LEFT JOIN abaixo faria fan-out e o
-    # save_to_gold abortaria por chave duplicada.
+    # 1 linha por ID_CARTA_ANTIGO (a mais recente), para o LEFT JOIN nao duplicar linhas.
     spark.sql("""
         CREATE OR REPLACE TEMP VIEW _migracoes_resolvidas AS
         SELECT ID_CARTA_ANTIGO, ID_CARTA_CANONICO
@@ -235,10 +187,8 @@ setup_unity_catalog(config['catalog_name'], config['schema_gold'])
 # =============================================================================
 # PROCESSAMENTO, DATA QUALITY E AUDITORIA
 # =============================================================================
-# Uma célula só, com um try/finally: toda run grava 1 linha de auditoria,
-# inclusive a que aborta no DQ pré-join (dentro do transform), na validação de
-# PK (save_gold_table) ou por erro inesperado - antes, só a run que chegava ao
-# DQ pós-carga deixava rastro, e o status FALHA_DQ_PK nunca era gravado.
+# try/finally: toda run grava 1 linha de auditoria, inclusive as que abortam
+# (DQ pré-join, validação de PK ou erro inesperado).
 audit_run = start_audit_run()
 audit_status = "SUCESSO"
 dq_resultados = {}
@@ -276,40 +226,35 @@ try:
 
     # DATA QUALITY (pós-carga)
     dq_resultados = run_data_quality_checks(spark, full_table_name, {
-        # Chave do fato vinda direto da Silver, sem COALESCE. Linha sem
-        # ID_ORACLE (vem de TB_FATO_CARTAS) é fato sem chave - não existe
-        # valor tolerável.
+        # ID_ORACLE vem da Silver sem COALESCE; nenhum nulo é tolerado.
         "fk_null_id_oracle": f"SELECT COUNT(*) FROM {full_table_name} WHERE ID_ORACLE IS NULL",
 
-        # NME_COLECAO/NME_BLOCO passam por COALESCE; os demais vêm da Silver
-        # já com 'NA' no lugar de nulo. NULL aqui = regra de nulo falhando.
+        # Categóricos nunca são nulos (COALESCE aqui ou 'NA' na Silver).
         "null_residual_categorico": f"""SELECT COUNT(*) FROM {full_table_name}
             WHERE NME_CARTA IS NULL OR NME_TIPO_CARTA IS NULL OR NME_RARIDADE IS NULL
                OR NME_CATEGORIA_COR IS NULL OR COD_CORES IS NULL
                OR NME_COLECAO IS NULL OR NME_BLOCO IS NULL""",
 
-        # Preço negativo não existe no Scryfall: se apareceu, foi transformação.
+        # A Scryfall não tem preço negativo: se aparecer, é erro de transformação.
         "valor_negativo_preco": f"""SELECT COUNT(*) FROM {full_table_name}
             WHERE VLR_USD < 0 OR VLR_EUR < 0 OR VLR_TIX < 0
                OR VLR_USD_FOIL < 0 OR VLR_USD_ETCHED < 0 OR VLR_EUR_FOIL < 0""",
 
-        # Informativo: é o COALESCE de coleção entrando em ação (carta cuja
-        # COD_COLECAO não veio em /sets). Sem baseline medida ainda - vira
-        # limite quando a primeira run com esse código disser quanto é hoje.
+        # Informativo: carta cuja COD_COLECAO não veio em /sets. Sem limite
+        # até haver baseline medida.
         "fk_colecao_nao_encontrada": (
             f"SELECT COUNT(*) FROM {full_table_name} WHERE NME_COLECAO = 'Nao_Identificado'",
             None,
         ),
 
-        # Informativo por natureza: carta que a Scryfall renumerou. Cresce com
-        # o tempo e nunca volta a zero.
+        # Informativo: ids migrados pela Scryfall só crescem com o tempo.
         "cartas_com_id_migrado": (
             f"SELECT COUNT(*) FROM {full_table_name} WHERE FLG_ID_CARTA_MIGRADO = 'Sim'",
             None,
         ),
     })
 except DataQualityError as erro_dq:
-    # Pré-join ou pós-carga: resultados do DQ que estourou vão pra auditoria.
+    # Pré-join ou pós-carga: as contagens do DQ vão para a auditoria.
     audit_status = "FALHA_DQ"
     dq_resultados = erro_dq.resultados
     raise
@@ -318,8 +263,7 @@ except Exception:
         audit_status = "FALHA"
     raise
 finally:
-    # finally: a unica prova do que aconteceu numa run abortada nao pode
-    # ser o log do cluster - que nao sobrevive ao fim do job.
+    # Grava sempre: o log do cluster não sobrevive ao fim do job.
     record_gold_audit(
         spark, config['catalog_name'], config['schema_gold'], "TB_FATO_MERCADO_CARTAS",
         audit_run,

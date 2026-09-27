@@ -1,4 +1,4 @@
-# 🏗️ Data Lake - Magic: The Gathering
+# Data Lake - Magic: The Gathering
 
 <div align="center">
 
@@ -8,28 +8,28 @@
 
 </div>
 
-## 📋 Visão Geral do Data Lake
+## Visão Geral do Data Lake
 
-Este repositório contém o **pipeline completo de dados** do Magic: The Gathering, implementado como um Data Lake moderno no Databricks. O pipeline segue a arquitetura **Medallion** com três camadas principais: **Bronze** (dados brutos), **Silver** (dados limpos) e **Gold** (análises executivas).
+Este repositório contém o pipeline de dados do Magic: The Gathering no Databricks. O pipeline segue a arquitetura **Medallion**, com uma Stage de ingestão e três camadas: **Bronze** (dados brutos), **Silver** (dados limpos) e **Gold** (tabela de consumo).
 
-### 🎯 **Objetivo Principal**
+### Objetivo Principal
 
-Transformar dados brutos da API do Magic: The Gathering em insights estratégicos e análises executivas, seguindo as melhores práticas de Data Engineering:
+Transformar dados brutos da API da Scryfall em uma tabela de mercado de cartas pronta para análise:
 
 - **Extract & Load** (Bronze) - Carregamento de dados brutos
 - **Transform & Load** (Silver) - Limpeza e enriquecimento
-- **Analyze & Load** (Gold) - Análises executivas e métricas
+- **Analyze & Load** (Gold) - Junção para consumo
 
-## 🏛️ Arquitetura do Data Lake
+## Arquitetura do Data Lake
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    🎮 MAGIC: THE GATHERING                  │
+│                    MAGIC: THE GATHERING                     │
 │                            DATA LAKE                        │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   🥉 BRONZE     │    │   🥈 SILVER    │    │   🥇 GOLD       │
+│   BRONZE        │    │   SILVER        │    │   GOLD          │
 │                 │    │                 │    │                 │
 │ • Extract       │───▶│ • Transform     │───▶│ • Analyze       │
 │ • Load          │    │ • Load          │    │ • Load          │
@@ -39,14 +39,14 @@ Transformar dados brutos da API do Magic: The Gathering em insights estratégico
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
-│                    🏛️ UNITY CATALOG                         │
-│{catalog}.{bronze|silver|gold}  (dev: mtg_dev · prd: mtg_prod)│
+│                    UNITY CATALOG                            │
+│{catalog}.{bronze|silver|gold} (dev: mtg_dev · prd: mtg_prod)│
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 📁 Estrutura das Camadas
+## Estrutura das Camadas
 
-### 🥉 **Camada Bronze** - Dados Brutos
+### Camada Bronze - Dados Brutos
 **Localização**: `src/01 - Ingestion/` → `src/02 - Bronze/`
 
 **Processo**: **EL (Extract & Load)**
@@ -55,16 +55,16 @@ Transformar dados brutos da API do Magic: The Gathering em insights estratégico
 - **Dados**: 6 tabelas, uma por origem da Stage (`cards`, `sets`, `card_prices`, `symbology`, `rulings`, `migrations`)
 
 **Características**:
-- ✅ Dados brutos preservados 1:1 (schema de origem, sem renomeação)
-- ✅ Append-only, sem dedup por chave de negócio - histórico completo preservado
-- ✅ Sem particionamento (volume atual não justifica)
-- ✅ Governança via Unity Catalog (tabela e coluna comentadas - ver [`Documentação/`](<02 - Bronze/Documentação/README.md>))
-- ✅ Histórico completo via Delta Lake
+- Dados brutos preservados 1:1 (schema de origem, sem renomeação)
+- Append-only, sem dedup por chave de negócio - histórico completo preservado
+- Sem particionamento (volume atual não justifica)
+- Governança via Unity Catalog (tabela e coluna comentadas - ver [`Documentação/`](<02 - Bronze/Documentação/README.md>))
+- Histórico completo via Delta Lake
 
 **Tabelas**: `cards`, `sets`, `card_prices`, `symbology`, `rulings`, `migrations` -
 sem prefixo `TB_BRONZE_`, já que vivem no schema `bronze` do Unity Catalog.
 
-### 🥈 **Camada Silver** - Dados Limpos
+### Camada Silver - Dados Limpos
 **Localização**: `src/03 - Silver/`
 
 **Processo**: **TL (Transform & Load)**
@@ -73,23 +73,22 @@ sem prefixo `TB_BRONZE_`, já que vivem no schema `bronze` do Unity Catalog.
 - **Dados**: 7 tabelas enriquecidas e padronizadas
 
 **Características**:
-- ✅ Dados limpos e padronizados
-- ✅ Enriquecimento com categorias e métricas
-- ✅ Nomenclatura 100% PT-BR com prefixo semântico (ID_, NME_, DESC_, COD_, DT_, ANO_, MES_, QTD_, VLR_, NUM_, FLG_, URL_)
-- ✅ Nomenclatura de tabela DAMA-DMBOK (Fato/Dimensão/Domínio/Ponte)
-- ✅ Qualidade de dados garantida
-- ✅ Regras de negócio em SQL, com duas exceções em Python: a normalização de texto (`normalizar_valores`, UDF) e a resolução da cadeia de migrações de ID (`attach_canonical_id` em TB_MOV_MIGRACOES_CARTAS, no driver)
+- Dados limpos e padronizados
+- Enriquecimento com categorias e métricas
+- Nomenclatura 100% PT-BR com prefixo semântico (ID_, NME_, DESC_, COD_, DT_, ANO_, MES_, QTD_, VLR_, NUM_, FLG_, URL_)
+- Nomenclatura de tabela DAMA-DMBOK (Fato/Dimensão/Domínio/Ponte)
+- Regras de negócio em SQL, com duas exceções em Python: a normalização de texto (`normalizar_valores`, UDF) e a resolução da cadeia de migrações de ID (`attach_canonical_id` em TB_MOV_MIGRACOES_CARTAS, no driver)
 
 **Tabelas**:
-- 🃏 **TB_FATO_CARTAS** - Cartas enriquecidas
-- 📦 **TB_DIM_COLECOES** - Expansões com metadados
-- 💰 **TB_FATO_PRECOS_CARTAS** - Preços processados
-- 📜 **TB_FATO_ESCLARECIMENTOS_CARTAS** - Esclarecimentos oficiais de regras
-- 🔀 **TB_MOV_MIGRACOES_CARTAS** - Reconciliação de IDs de carta
-- 🔣 **TB_DOM_SIMBOLOS** - Catálogo de símbolos de mana/custo
-- 🧩 **TB_PONTE_CARTA_SIMBOLOS** - Ponte carta x símbolo (custo de mana explodido)
+- **TB_FATO_CARTAS** - Cartas enriquecidas
+- **TB_DIM_COLECOES** - Expansões com metadados
+- **TB_FATO_PRECOS_CARTAS** - Preços processados
+- **TB_FATO_ESCLARECIMENTOS_CARTAS** - Esclarecimentos oficiais de regras
+- **TB_MOV_MIGRACOES_CARTAS** - Reconciliação de IDs de carta
+- **TB_DOM_SIMBOLOS** - Catálogo de símbolos de mana/custo
+- **TB_PONTE_CARTA_SIMBOLOS** - Ponte carta x símbolo (custo de mana explodido)
 
-### 🥇 **Camada Gold** - Análises Executivas
+### Camada Gold - Consumo
 **Localização**: `src/04 - Gold/`
 
 **Processo**: **AL (Analyze & Load)**
@@ -98,17 +97,17 @@ sem prefixo `TB_BRONZE_`, já que vivem no schema `bronze` do Unity Catalog.
 - **Dados**: 1 tabela pronta para consumo direto (analista/BI/Genie), sem precisar conhecer Bronze/Silver
 
 **Características**:
-- ✅ Visão única de mercado (catálogo + coleção + preço + esclarecimentos de regras + migrações de ID)
-- ✅ Grão: 1 linha por cotação de preço de uma impressão de carta
-- ✅ Data quality e auditoria por run (`TB_AUDITORIA_GOLD`)
-- ✅ Transformações em SQL puro, sem UDFs Python
+- Visão única de mercado (catálogo + coleção + preço + esclarecimentos de regras + migrações de ID)
+- Grão: 1 linha por cotação de preço de uma impressão de carta
+- Data quality e auditoria por run (`TB_AUDITORIA_GOLD`)
+- Transformações em SQL puro, sem UDFs Python
 
 **Tabelas**:
-- 📊 **TB_FATO_MERCADO_CARTAS** - Visão única de mercado (catálogo + coleção + preço + esclarecimentos de regras + migrações de ID)
+- **TB_FATO_MERCADO_CARTAS** - Visão única de mercado (catálogo + coleção + preço + esclarecimentos de regras + migrações de ID)
 
-## 🔄 Fluxo de Dados Completo
+## Fluxo de Dados Completo
 
-### **1. Ingestão / Stage (01 - Ingestion)**
+### 1. Ingestão / Stage (01 - Ingestion)
 ```python
 # Controle de execução: início do run
 run = start_run("cards", endpoint, params)
@@ -123,7 +122,7 @@ save_to_parquet(spark, data, "cards", base_path, schema=CARDS_SCHEMA, run=run)  
 finish_run(run, base_path, status="SUCCESS")
 ```
 
-### **2. Bronze (02 - Bronze)**
+### 2. Bronze (02 - Bronze)
 ```python
 # EL puro: lê só os arquivos novos da Stage e faz append no Delta,
 # sem regra de negócio - ver Dev/bronze_utils.py
@@ -136,7 +135,7 @@ run_bronze_ingestion(
 )
 ```
 
-### **3. Silver (03 - Silver)**
+### 3. Silver (03 - Silver)
 ```python
 # Extração da Bronze e transformação via SQL (spark.sql() sobre temp view)
 df_bronze = extract_from_bronze(catalog_name, "cards")
@@ -145,7 +144,7 @@ df_silver = spark.sql("SELECT ... FROM _cards_bronze")  # ver Dev/TB_FATO_CARTAS
 save_to_silver(df_silver, catalog_name, "silver", "TB_FATO_CARTAS", s3_silver_path, ...)
 ```
 
-### **4. Gold (04 - Gold)**
+### 4. Gold (04 - Gold)
 ```python
 # Extração das tabelas Silver e junção via SQL (spark.sql() sobre temp views)
 df_gold = spark.sql("SELECT ... FROM _cartas JOIN _precos ...")  # ver Dev/TB_FATO_MERCADO_CARTAS.py
@@ -153,62 +152,51 @@ df_gold = spark.sql("SELECT ... FROM _cartas JOIN _precos ...")  # ver Dev/TB_FA
 save_to_gold(df_gold, catalog_name, "gold", "TB_FATO_MERCADO_CARTAS", s3_gold_path, ...)
 ```
 
-## 🛠️ Tecnologias Utilizadas
+## Tecnologias Utilizadas
 
-### **Plataforma Principal**
+### Plataforma Principal
 - **Databricks** - Plataforma unificada de analytics
 - **Unity Catalog** - Governança de dados
 - **Delta Lake** - Storage layer ACID
 - **Apache Spark** - Processamento distribuído
 
-### **Linguagens e APIs**
+### Linguagens e APIs
 - **SQL** - Regras de negócio das camadas Silver e Gold (`spark.sql()` sobre temp views; na Silver, `normalizar_valores` usa uma UDF pra tirar acento)
 - **Python** - Orquestração (extract/load/save/config)
 - **PySpark** - Leitura/escrita de dados e integração com Delta Lake
 
-### **Infraestrutura**
+### Infraestrutura
 - **AWS S3** - Storage das camadas (Parquet da Stage e Delta de Bronze/Silver/Gold)
 - **Databricks Secrets** - Gerenciamento de credenciais
 - **Databricks Clusters** - Computação escalável
 
-## 📊 Métricas e KPIs do Pipeline
+## Métricas e KPIs do Pipeline
 
-### **Performance**
+### Performance
 - **Ingestão**: bulk-data em 1 download por tabela (cards/card_prices de `default_cards`, rulings de `rulings`); /sets e /symbology em 1 request; /migrations paginado
 - **Processamento**: Incremental por chaves específicas
-- **Tempo de Execução**: <50 minutos para pipeline completo
 
-### **Qualidade**
+### Qualidade
 - **Bronze**: Preservação de dados originais
 - **Silver**: Dados limpos e válidos
 - **Gold**: Análises com métricas validadas
 
-## 🎯 Casos de Uso
+## Casos de Uso
 
-### **Análises de Mercado**
+### Análises de Mercado
 - Valorização de cartas por set e raridade
 - Análise de tendências temporais
-- Identificação de oportunidades de investimento
+- Carta por volume de esclarecimentos de regras
 
-### **Análises de Jogo**
-- Performance de cartas por formato
-- Análise de metagame e tendências
-- Estatísticas de uso e popularidade
+## Configuração e Execução
 
-### **Análises Executivas**
-- KPIs de performance de investimentos
-- Alertas de oportunidades e riscos
-- Relatórios estratégicos para tomada de decisão
-
-## 🔧 Configuração e Execução
-
-### **Pré-requisitos**
+### Pré-requisitos
 - Databricks Workspace configurado
 - Unity Catalog habilitado
 - Cluster Spark disponível
 - Segredos configurados no scope `mtg-pipeline`
 
-### **Segredos Necessários**
+### Segredos Necessários
 ```python
 catalog_name           # Nome do catálogo Unity (opcional: default mtg_dev)
 scryfall_api_url      # URL base da Scryfall API (Stage)
@@ -224,42 +212,33 @@ s3_gold_prefix        # Prefixo da camada gold
 Precedência: env var `MTG_<NOME>` > secret > default; prd injeta
 `MTG_CATALOG_NAME=mtg_prod` e `MTG_S3_BUCKET` via deploy.
 
-### **Ordem de Execução**
+### Ordem de Execução
 1. **Ingestão**: `src/01 - Ingestion/` (extração da API)
 2. **Bronze**: `src/02 - Bronze/` (carregamento de dados brutos)
 3. **Silver**: `src/03 - Silver/` (transformação e limpeza)
-4. **Gold**: `src/04 - Gold/` (análises executivas)
+4. **Gold**: `src/04 - Gold/` (tabela de mercado)
 
 
-## 🚀 Próximos Passos
+## Próximos Passos
 
-### **Expansão Imediata**
+### Expansão Imediata
 - Camada Gold com múltiplas tabelas (Star Schema completo, hoje é 1 tabela larga)
 - Análises por formato de jogo (Standard, Modern, Commander)
 
-### **Melhorias Futuras**
+### Melhorias Futuras
 - Análises de sentimento de cartas
 - Integração com dados de torneios
 - Dashboard executivo em tempo real
 
-### **Otimizações**
+### Otimizações
 - Particionamento avançado por múltiplas dimensões
-- Cache inteligente para consultas frequentes
 - Otimização de queries com Z-Order
-- Monitoramento avançado de performance
-
-## 🎴 Flavor Text do Data Lake
-
-*"Como um multiverso de dados que se expande infinitamente, este Data Lake transforma a magia bruta da informação em insights estratégicos de poder inestimável. Cada camada é um plano de existência, cada tabela uma criatura mágica, cada análise um feitiço de poder executivo."*
 
 ---
 
-## 📞 Suporte e Contato
+## Suporte e Contato
 
 Para dúvidas, sugestões ou problemas:
-- Verificar documentação específica de cada camada
-- Consultar logs de execução no Databricks
-- Revisar configurações de segredos e permissões
-- Verificar status do Unity Catalog e Delta Lake
+- Documentação de cada camada (`src/*/Readme.md`)
+- Logs das runs no Databricks
 
-**🎮 Que a magia dos dados esteja sempre com você!** 

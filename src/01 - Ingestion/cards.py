@@ -28,15 +28,12 @@ from pyspark.sql.types import StructType, StructField, StringType, IntegerType, 
 # =============================================================================
 MAX_RETRIES = int(get_secret("max_retries", "3"))
 
-# 1 download do catálogo inteiro da Scryfall, filtrado em memória pelos
-# set_codes da janela temporal - bem mais rápido que paginar coleção por
-# coleção.
+# Baixa o catálogo inteiro da Scryfall (bulk data) e filtra em memória pelos
+# set_codes da janela temporal.
 SCRYFALL_API_URL = get_secret("scryfall_api_url")
 SCRYFALL_HEADERS = {"User-Agent": "MTGPipeline/1.0"}
-# default_cards = 1 objeto por impressão (não por Oracle ID) - grava 1 linha
-# por impressão, já que set/artist/number/imageUrl variam por edição. Mesmo
-# bulk usado por card_prices.py, pelo mesmo motivo: preço também varia por
-# impressão.
+# default_cards = 1 objeto por impressão (set/artist/number/imageUrl variam
+# por edição). Mesmo bulk de card_prices.py.
 SCRYFALL_BULK_TYPE = "default_cards"
 
 # Configurações do S3
@@ -85,18 +82,15 @@ CARDS_SCHEMA = StructType([
     StructField("originalType", StringType(), True),
     StructField("legalities", StringType(), True),
     StructField("id", StringType(), True),
-    # oracle_id identifica a carta (Oracle) através de reimpressões - estável
-    # onde `id` (por impressão) não é. Usado na Gold pra ligar a carta aos
-    # esclarecimentos (rulings), que referenciam oracle_id.
+    # oracle_id identifica a carta entre reimpressões (`id` é por impressão).
+    # Usado na Gold para ligar a carta às rulings.
     StructField("oracle_id", StringType(), True)
 ])
 
 
 def _face_fallback(card, key):
-    # Cards de dupla face (DFC) não têm mana_cost/oracle_text/artist/power/
-    # toughness/image_uris no nível raiz - só dentro de card_faces[0] (frente).
-    # `is not None` em vez de `or`: colors:[] no nível raiz é válido (incolor),
-    # não "ausente".
+    # Cartas de dupla face (DFC) trazem alguns campos só em card_faces[0] (frente).
+    # Usa `is not None` porque colors:[] na raiz é válido (incolor).
     value = card.get(key)
     if value is not None:
         return value
@@ -105,10 +99,8 @@ def _face_fallback(card, key):
 
 
 def _to_card_record(card):
-    # Landing zone só captura o dado bruto e filtra por coleção - sem
-    # tratamento/coerção de negócio. json.dumps serializa os campos compostos
-    # (list/dict, incluindo o dict `legalities`) pois colunas StringType do
-    # Parquet não guardam estrutura aninhada.
+    # Dado bruto, sem regra de negócio. Listas/dicts viram JSON porque as
+    # colunas são StringType.
     image_uris = _face_fallback(card, "image_uris")
     colors = _face_fallback(card, "colors")
     color_identity = card.get("color_identity")
@@ -133,7 +125,7 @@ def _to_card_record(card):
         "power": _face_fallback(card, "power"),
         "toughness": _face_fallback(card, "toughness"),
         "layout": card.get("layout"),
-        # Scryfall tem multiverse_ids (lista); nao mapeado, fica o legado nulo
+        # multiverse_ids (lista) da Scryfall nao e mapeado
         "multiverseid": None,
         "imageUrl": image_uris.get("normal") if image_uris else None,
         "variations": None,
@@ -143,23 +135,18 @@ def _to_card_record(card):
         "originalType": None,
         "legalities": json.dumps(legalities) if legalities is not None else None,
         "id": card.get("id"),
-        # oracle_id é sempre raiz (mesmo em DFC - identifica a carta, não a
-        # face), então sem _face_fallback aqui.
+        # oracle_id fica sempre na raiz, mesmo em DFC.
         "oracle_id": card.get("oracle_id"),
     }
 
 
 def fetch_cards_by_sets(valid_set_codes):
-    # 1 request pro índice do Bulk Data + 1 pro catálogo inteiro, filtrado em
-    # memória. http_get_with_retry (ingestion_utils.py) dá retry/backoff em
-    # 429/5xx/timeout nos dois.
+    # 1 request pro índice do Bulk Data + 1 pro catálogo inteiro, filtrado em memória.
     resp = http_get_with_retry(f"{SCRYFALL_API_URL}/bulk-data", headers=SCRYFALL_HEADERS, retries=MAX_RETRIES)
     entry = next(e for e in resp.json()["data"] if e["type"] == SCRYFALL_BULK_TYPE)
 
     raw = http_get_with_retry(entry["jsonl_download_uri"], headers=SCRYFALL_HEADERS, timeout=120, retries=MAX_RETRIES).content
-    # get_scryfall_set_codes_since já devolve códigos em minúsculas e o campo
-    # `set` das cartas também é minúsculo na Scryfall - comparação direta,
-    # sem normalizar.
+    # Os dois lados já vêm em minúsculas (set_codes e campo `set` da Scryfall).
     valid_codes = set(valid_set_codes)
     records = []
     for line in gzip.decompress(raw).decode("utf-8").splitlines():
@@ -216,12 +203,10 @@ if not setup_success:
 
 print("Setup concluído com sucesso")
 
-# Coleções (sets) lançadas dentro da janela de YEARS_BACK anos - via Scryfall
-# /sets (get_scryfall_set_codes_since), não mais a magicthegathering.io.
+# Coleções (sets) lançadas dentro da janela de YEARS_BACK anos
 set_codes = get_scryfall_set_codes_since(SCRYFALL_API_URL, SCRYFALL_HEADERS, CUTOFF_DATE_STR, retries=MAX_RETRIES)
 
-# Controle de execução (run_id, status, contagens) via run_stage_ingestion -
-# padroniza o wrapper start_run -> try/ingest -> finish_run - ver ingestion_utils.py
+# Executa com controle de execução (ver run_stage_ingestion em ingestion_utils.py)
 cards_df, run = run_stage_ingestion(
     "cards", "bulk-data/default_cards",
     lambda run: ingest_cards_by_collection(set_codes, table_name="cards", run=run),
@@ -235,11 +220,11 @@ print("RELATÓRIO DE INGESTÃO DE CARDS")
 print("=" * 50)
 
 if cards_df is not None:
-    print("✅ Arquivos salvos com sucesso")
-    print(f"📊 Total de registros: {cards_df.count()}")
-    print(f"🗂️ Coleções processadas: {len(set_codes)} (últimos {YEARS_BACK} anos)")
-    print("🎯 Particionamento: por ingestion_timestamp (ano/mês/dia da execução)")
+    print("Arquivos salvos com sucesso")
+    print(f"Total de registros: {cards_df.count()}")
+    print(f"Coleções processadas: {len(set_codes)} (últimos {YEARS_BACK} anos)")
+    print("Particionamento: por ingestion_timestamp (ano/mês/dia da execução)")
 else:
-    print("❌ Falha na ingestão de cards")
+    print("Falha na ingestão de cards")
 
 print("=" * 50)

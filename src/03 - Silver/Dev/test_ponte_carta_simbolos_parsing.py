@@ -1,7 +1,5 @@
-# ponytail: self-check de lógica pura pra transform_ponte_carta_simbolos() em
-# TB_PONTE_CARTA_SIMBOLOS.py. Não dá pra rodar regexp_extract_all/posexplode
-# do Spark localmente, então isto espelha a extração de símbolos via re
-# (mesmo padrão de test_migration_chain.py).
+# Testa o regex de extração de símbolos de TB_PONTE_CARTA_SIMBOLOS.py com `re`,
+# no lugar de regexp_extract_all/posexplode do Spark.
 import re
 
 PADRAO_SIMBOLO = r"\[[^\]]*\]"

@@ -1,10 +1,7 @@
 # Databricks notebook source
 # Camada Bronze - Symbology - Magic: The Gathering
-# Objetivo: EL (Extract & Load) da Stage (S3/Parquet) para Bronze (Delta)
-# Escopo: sem regra de negocio, sem renomeacao de colunas, sem deduplicacao
-# por chave de negocio e sem MERGE/upsert - so APPEND, preservando o dado da
-# Stage 1:1 e adicionando apenas metadados tecnicos de rastreabilidade
-# (source_file, bronze_run_id, bronze_ingestion_timestamp).
+# EL da Stage (S3/Parquet) para Bronze (Delta): so APPEND, dado 1:1 +
+# metadados tecnicos. Regras da camada em bronze_utils.py.
 # Catalogo de referencia estatico (simbolos de mana/carta) - mesmo assim,
 # sem MERGE: cada execucao e um snapshot append-only do catalogo.
 

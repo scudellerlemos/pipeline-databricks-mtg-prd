@@ -1,6 +1,5 @@
-# ponytail: o payload do smoke e montado a partir do gold.yml ja passado pelo
-# apply_target. Se essa heranca quebrar, o smoke roda com o cluster/tag/config
-# ERRADOS e passa - virando o pior tipo de teste: um que da verde sozinho.
+# O payload do smoke herda cluster/tag/config do gold.yml passado pelo
+# apply_target. Estes testes garantem que ele roda com a config do alvo.
 
 import os
 import sys
@@ -52,7 +51,7 @@ def test_smoke_herda_tag_e_config_do_alvo():
     # roda a tag promovida, nao a main
     assert payload["git_source"]["git_tag"] == "v1.0.0"
     assert "git_branch" not in payload["git_source"]
-    # e com o catalogo de prd no cluster - senao o smoke valida o mtg_dev
+    # com o catalogo de prd no cluster
     env_vars = payload["job_clusters"][0]["new_cluster"]["spark_env_vars"]
     assert env_vars["MTG_CATALOG_NAME"] == "mtg_prod"
     # a task tem que ser o smoke, nao a Gold de verdade
@@ -74,8 +73,7 @@ def test_smoke_em_dev_fica_na_branch_e_sem_sufixo():
 
 
 def test_o_notebook_do_smoke_existe():
-    # notebook_path vai pro Databricks como caminho no repo: errar aqui so
-    # aparece 4min depois, com o cluster ja de pe.
+    # caminho errado so falharia no Databricks, depois de subir o cluster.
     smoke = _smoke_com_env({})
     assert os.path.exists(os.path.join(RAIZ, smoke.NOTEBOOK + ".py"))
 

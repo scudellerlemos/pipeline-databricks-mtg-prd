@@ -3,40 +3,17 @@
 # CAMADA SILVER - SIMBOLOS DE MANA - MAGIC: THE GATHERING
 # =============================================================================
 """
-Script Python para processamento da tabela TB_DOM_SIMBOLOS.
-Transformacao e limpeza de dados da Bronze para Silver.
+TB_DOM_SIMBOLOS: simbolos de mana/custo da Scryfall, Bronze `symbology` -> Silver.
 
-CLASSIFICACAO DAMA-DMBOK: DOM/REF - lista de referencia pequena e
-praticamente estatica (catalogo de simbolos de mana/custo da Scryfall,
-raramente ganha item novo), sem grao de evento nem medida de negocio. Daí o
-prefixo TB_DOM_ (dominio) e nao TB_DIM_ (que e reservado a entidades que
-crescem organicamente, como TB_DIM_COLECOES).
+Dominio: lista pequena e quase estatica, uma linha por simbolo.
+Chave unica: COD_SIMBOLO (nunca nulo na fonte), declarada como PRIMARY KEY.
 
-CHAVE UNICA: COD_SIMBOLO (notacao do simbolo - sempre presente e nunca nula
-na fonte, ver save_silver_table no fim do notebook) - coluna unica NOT NULL,
-Unity Catalog consegue declarar a constraint PRIMARY KEY de verdade.
+COD_SIMBOLO troca chaves por colchetes ("{2/U}" -> "[2/U]"), a mesma notacao
+de DESC_CUSTO_MANA em TB_FATO_CARTAS, para casar com TB_PONTE_CARTA_SIMBOLOS.
+COD_SIMBOLO nao passa por normalizar_valor().
 
-REGRA "SEM ( ) { } NO DADO SILVER" - APLICADA SEM EXCECAO A COD_SIMBOLO:
-- A notacao nativa de simbolo de mana da Scryfall usa chaves (ex.: "{W}",
-  "{2/U}") - e notacao legitima do dominio, nao um artefato de serializacao
-  como em outras colunas. Mesmo assim, esta tabela segue a MESMA conversao
-  pra colchete ([W], [2/U]) que TB_FATO_CARTAS ja aplica em DESC_CUSTO_MANA
-  (em DESC_CARTA os simbolos basicos viram nomes, ex.: [White]/[Tap], e nao
-  casam direto com COD_SIMBOLO) - sem essa consistencia, o mesmo simbolo
-  apareceria com notacao diferente em cada tabela, e a Gold nao conseguiria
-  juntar um token extraido de DESC_CUSTO_MANA contra COD_SIMBOLO sem antes reconverter a notacao. COD_SIMBOLO
-  NUNCA recebe normalizar_valor()/Title_Case - so a conversao de chave, sem
-  excecao (ver transform_symbology_silver abaixo).
-
-CONVENCAO DE NOME/CASE DE COLUNA (pedido do usuario): mesma de TB_FATO_CARTAS
-(ver docstring de la) - nome de coluna 100% MAIUSCULO, valor de atributo em
-Title_Case por palavra sem acento (normalizar_valor() em silver_utils.py),
-exceto COD_/ID_/URL_* (COD_SIMBOLO em particular - ver regra acima) e texto
-livre longo.
-
-SEM partition_cols: tabela pequena e estatica (uma linha por simbolo de
-mana conhecido, algumas dezenas de linhas) - particionamento fisico nao
-traz beneficio aqui.
+Mesma convencao de nome/case de TB_FATO_CARTAS. Sem particionamento: tabela
+de poucas dezenas de linhas.
 """
 
 # =============================================================================
@@ -84,9 +61,8 @@ def transform_symbology_silver(df):
 
     df.createOrReplaceTempView("_symbology_bronze")
 
-    # Renomeia Bronze -> PT-BR, converte chave pra colchete em COD_SIMBOLO
-    # (regra sem excecao - ver docstring do modulo, NUNCA normalizar_valor()
-    # aqui) e limpa array serializado em COD_CORES/DESC_GRAFIAS_GATHERER.
+    # Renomeia Bronze -> PT-BR, troca chave por colchete em COD_SIMBOLO e
+    # limpa o array serializado em COD_CORES/DESC_GRAFIAS_GATHERER.
     df_final = spark.sql(r"""
         SELECT
             regexp_replace(regexp_replace(symbol, '\\{', '['), '\\}', ']') AS COD_SIMBOLO,
@@ -112,7 +88,7 @@ def transform_symbology_silver(df):
         FROM _symbology_bronze
     """)
 
-    # COD_SIMBOLO fica de fora: regra sem excecao (ver docstring do modulo).
+    # COD_SIMBOLO fica de fora (ver docstring do modulo).
     df_final = normalizar_valores(df_final, [
         "DESC_VARIANTE_LIVRE", "DESC_SIMBOLO", "DESC_GRAFIAS_GATHERER", "NME_FONTE",
     ])
@@ -124,11 +100,8 @@ def transform_symbology_silver(df):
 # CONFIGURACAO
 # =============================================================================
 
-# Configuracao manual. catalog_name vem do mesmo secret que a Bronze usa
-# (get_secret("catalog_name")).
 config = create_manual_config(get_secret("catalog_name"), get_secret("s3_bucket"))
 
-# Setup Unity Catalog
 setup_unity_catalog(config['catalog_name'], config['schema_silver'])
 
 # COMMAND ----------
@@ -136,17 +109,12 @@ setup_unity_catalog(config['catalog_name'], config['schema_silver'])
 # =============================================================================
 # PROCESSAMENTO USANDO SILVER_UTILS
 # =============================================================================
-# Criar processor
 processor = SilverTableProcessor("TB_DOM_SIMBOLOS", config)
 
-# Extracao da Bronze (nome real da tabela no catalog, minusculo)
 df_bronze = processor.extract_from_bronze("symbology")
 
-# Aplicar transformacao especifica
 df_silver = processor.transform_data(df_bronze, transform_symbology_silver)
 
-# Salvar na Silver com merge incremental por COD_SIMBOLO. Sem partition_cols
-# (ver docstring da celula anterior - tabela pequena e estatica).
 processor.save_silver_table(
     df_silver,
     key_column="COD_SIMBOLO",

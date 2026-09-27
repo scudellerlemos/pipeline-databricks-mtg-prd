@@ -1,13 +1,10 @@
-# ponytail: pure-logic self-check for bronze_utils.py's non-trivial bits -
-# idempotency (which stage files are "new") and schema-diff logging. Can't
-# import bronze_utils.py directly (pyspark + live dbutils/%run required), so
-# this mirrors just the decision logic in plain Python.
+# Testa a lógica de bronze_utils.py (idempotência e diff de schema) em Python
+# puro: bronze_utils depende de pyspark/dbutils/%run e não importa fora do
+# Databricks. Limitação: as funções abaixo são cópias - mudou lá, atualizar aqui.
 
 
 def normalize_path(path):
-    """Mirrors bronze_utils.normalize_path: strip URI scheme and truncate to
-    the ".parquet" directory level (df.write.save() always writes a
-    directory - _metadata.file_path points at a part-file inside it)."""
+    """Mirrors bronze_utils.normalize_path."""
     path = path.split("://", 1)[-1]
     if ".parquet/" in path:
         path = path.split(".parquet/", 1)[0] + ".parquet"
@@ -15,14 +12,8 @@ def normalize_path(path):
 
 
 def list_stage_files_filter(names, contents=None):
-    """Mirrors list_stage_files' filter: dbutils.fs.ls names a directory with
-    a trailing "/" (Spark's .save(path) always writes `path` as a directory),
-    so the check must strip it before comparing the ".parquet" suffix.
-
-    contents maps a directory name to what's inside it. A directory with no
-    part-file is a write that started and never committed (only the
-    _started_* commit marker is left); it must be skipped, or read.parquet
-    fails the whole Bronze run with UNABLE_TO_INFER_SCHEMA."""
+    """Mirrors list_stage_files' filter. contents maps a directory name to
+    what's inside it."""
     contents = contents or {}
     out = []
     for n in names:
@@ -36,8 +27,7 @@ def list_stage_files_filter(names, contents=None):
 
 
 def find_new_files(all_stage_files, already_loaded_files):
-    """Mirrors run_bronze_ingestion's idempotency filter: files present in
-    Stage but not yet reflected by any source_file already in Bronze."""
+    """Mirrors run_bronze_ingestion's idempotency filter."""
     already = set(already_loaded_files)
     return [f for f in all_stage_files if normalize_path(f) not in already]
 
@@ -54,8 +44,6 @@ def diff_schema(existing_fields, incoming_fields):
 
 
 def test_no_new_files_when_everything_already_loaded():
-    # already_loaded_files espelha o retorno (já normalizado, sem esquema de
-    # URI) de get_already_loaded_files.
     all_files = ["s3://b/stage/2026_09_14_cards.parquet"]
     already = {"b/stage/2026_09_14_cards.parquet"}
     assert find_new_files(all_files, already) == []
@@ -71,18 +59,14 @@ def test_only_unseen_files_are_new():
 
 
 def test_rerun_same_day_is_noop():
-    # 2nd run same day: Stage's save_to_parquet já pulou a escrita de um
-    # arquivo novo (nome do arquivo inclui o dia), então a Bronze também
-    # não vê arquivo novo.
+    # O nome do arquivo da Stage inclui o dia, então a 2a run do dia não gera arquivo novo.
     all_files = ["s3://b/stage/2026_09_14_cards.parquet"]
     already = {"b/stage/2026_09_14_cards.parquet"}
     assert find_new_files(all_files, already) == []
 
 
 def test_scheme_mismatch_does_not_cause_reprocessing():
-    # dbutils.fs.ls() pode devolver s3:// enquanto _metadata.file_path (já
-    # normalizado em get_already_loaded_files) devolveu s3a:// pro mesmo
-    # arquivo - sem normalize_path, isto reprocessaria e duplicaria histórico.
+    # dbutils.fs.ls devolve s3:// e _metadata.file_path pode vir s3a:// pro mesmo arquivo.
     all_files = ["s3://b/stage/2026_09_14_cards.parquet"]
     already = {normalize_path("s3a://b/stage/2026_09_14_cards.parquet")}
     assert find_new_files(all_files, already) == []
@@ -111,8 +95,7 @@ def test_schema_diff_first_load_is_all_new():
 
 
 def stage_table_path(s3_stage_path, stage_table_name):
-    """Mirrors list_stage_files' table_path: each Stage table now has its
-    own subfolder instead of a shared flat directory filtered by suffix."""
+    """Mirrors list_stage_files' table_path: one subfolder per Stage table."""
     return f"{s3_stage_path}/{stage_table_name}"
 
 
@@ -122,18 +105,14 @@ def test_stage_table_path_is_per_table_subfolder():
 
 
 def test_list_stage_files_filter_matches_directory_entries():
-    # dbutils.fs.ls nomeia diretório com "/" no final - sem rstrip, o filtro
-    # nunca batia e list_stage_files devolvia sempre [] (bug real: toda run
-    # caía no branch idempotente "nada a fazer", mesmo com dado novo).
+    # dbutils.fs.ls devolve diretório com "/" no final.
     names = ["2026_09_15_cards.parquet/", "_SUCCESS", "2026_09_15_cards.parquet.crc"]
     assert list_stage_files_filter(names) == ["2026_09_15_cards.parquet/"]
 
 
 def test_uncommitted_write_directory_is_skipped():
-    # Bug real: 2022_04_16_card_prices.parquet/ ficou no S3 com só o marcador
-    # _started_* (escrita que não commitou, mascarada por um falso sucesso na
-    # Stage). Entrava em new_files e derrubava a Bronze inteira com
-    # UNABLE_TO_INFER_SCHEMA.
+    # Diretório só com o marcador _started_* é escrita não commitada; lê-lo
+    # derruba a run com UNABLE_TO_INFER_SCHEMA.
     names = ["ok.parquet/", "quebrado.parquet/"]
     contents = {
         "ok.parquet/": ["part-00000-x.snappy.parquet", "_SUCCESS"],
@@ -143,17 +122,13 @@ def test_uncommitted_write_directory_is_skipped():
 
 
 def test_normalize_path_truncates_part_file_to_parquet_dir():
-    # _metadata.file_path aponta pro part-file dentro do diretório ".parquet";
-    # list_stage_files devolve o diretório em si - sem truncar, nunca bateriam.
     part_file = "s3://b/stage/cards/2026_09_15_cards.parquet/part-00000-x.snappy.parquet"
     directory = "s3://b/stage/cards/2026_09_15_cards.parquet"
     assert normalize_path(part_file) == normalize_path(directory)
 
 
 def test_already_loaded_part_file_marks_directory_as_not_new():
-    # Reproduz o fluxo real: get_already_loaded_files devolve o part-file
-    # (via _metadata.file_path); list_stage_files devolve o diretório. Depois
-    # da normalização, o mesmo arquivo da Stage não deve ser visto como novo.
+    # Bronze guarda o part-file (s3a://), a Stage lista o diretório (s3://).
     already_loaded = {normalize_path(
         "s3a://b/stage/cards/2026_09_15_cards.parquet/part-00000-x.snappy.parquet"
     )}

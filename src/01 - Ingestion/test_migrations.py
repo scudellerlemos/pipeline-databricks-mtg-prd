@@ -1,7 +1,5 @@
-# ponytail: mesma abordagem de test_sets.py/test_symbology.py - a célula
-# "FUNÇÕES ESPECÍFICAS" do notebook não é um módulo importável por si só,
-# então carrega seu código-fonte direto do notebook .py e executa com um
-# `requests` fake (respostas paginadas de /migrations).
+# O notebook não é importável: carrega o código da célula "FUNÇÕES ESPECÍFICAS"
+# e executa com um `requests` fake (respostas paginadas de /migrations).
 
 import json
 import os
@@ -114,8 +112,6 @@ def test_fetch_all_migrations_maps_delete_and_merge_fields():
 
 
 def test_fetch_all_migrations_follows_pagination():
-    # /migrations é o único endpoint da Stage que pagina de verdade
-    # (has_more/next_page) - confirma que o loop segue até has_more=false.
     def _fake_migration(i):
         return {
             "id": f"id-{i}", "uri": f"https://x/{i}", "performed_at": "2026-01-01",

@@ -1,7 +1,5 @@
-# ponytail: mesma abordagem de test_card_prices.py - a célula do notebook não
-# é um módulo importável por si só, então carrega o código-fonte da célula
-# "FUNÇÕES ESPECÍFICAS" direto do notebook .py e executa com um `requests`
-# fake (índice de bulk-data + payload jsonl gzipado).
+# O notebook não é importável: carrega o código da célula "FUNÇÕES ESPECÍFICAS"
+# e executa com um `requests` fake (índice de bulk-data + jsonl gzipado).
 
 import gzip
 import json
@@ -18,8 +16,7 @@ def _load_functions(fake_get):
 
     ns = {
         "json": json,
-        # vem do %run ./ingestion_utils no notebook - comportamento real
-        # coberto por test_ingestion_utils.test_as_float_converte_int_e_preserva_none
+        # no notebook vem do %run ./ingestion_utils
         "as_float": lambda v: float(v) if v is not None else None,
         "gzip": gzip,
         "http_get_with_retry": lambda url, headers=None, timeout=30, retries=3: fake_get(url, headers=headers, timeout=timeout),
@@ -117,7 +114,7 @@ def test_double_faced_card_falls_back_to_front_face():
 
 
 def test_reversible_card_sem_type_line_na_raiz_usa_a_frente():
-    # Sem o fallback, NME_TIPO_CARTA saía NULO e derrubava o DQ da Gold.
+    # type nulo quebra o DQ de NME_TIPO_CARTA na Gold.
     card = {"name": "X // X", "layout": "reversible_card", "id": "rev-1",
             "card_faces": [{"type_line": "Legendary Creature — Elf"}, {"type_line": "Legendary Creature — Elf"}]}
 
@@ -126,8 +123,7 @@ def test_reversible_card_sem_type_line_na_raiz_usa_a_frente():
 
 
 def test_double_faced_card_empty_colors_not_treated_as_missing():
-    # colors: [] no nível raiz (ex.: carta incolor) é um valor válido - não
-    # deve cair no fallback pra card_faces (`is not None`, não `or`).
+    # colors: [] na raiz (carta incolor) é válido - não cai no fallback pra card_faces.
     card = {"name": "X", "colors": [], "card_faces": [{"colors": ["R"]}]}
 
     to_card_record, _ = _load_functions(_fake_get_for([]))
@@ -137,8 +133,7 @@ def test_double_faced_card_empty_colors_not_treated_as_missing():
 
 
 def test_legalities_dict_is_serialized_as_valid_json():
-    # legalities na Scryfall é um dict (não list) - _to_card_record precisa
-    # serializar via json.dumps pra gravar JSON válido, não um repr Python.
+    # legalities é dict: tem que sair como JSON válido, não repr Python.
     card = {"name": "X", "legalities": {"standard": "legal", "modern": "legal"}}
 
     to_card_record, _ = _load_functions(_fake_get_for([]))
@@ -160,9 +155,7 @@ def test_missing_scryfall_only_fields_are_none():
     assert record["types"] is None
 
 
-# fetch_valid_set_codes ficou em ingestion_utils.py como get_scryfall_set_codes_since
-# (usa http_get_with_retry) - coberto por
-# test_get_scryfall_set_codes_since_filters_by_date_and_lowercases em test_ingestion_utils.py.
+# get_scryfall_set_codes_since é testado em test_ingestion_utils.py.
 
 
 if __name__ == "__main__":

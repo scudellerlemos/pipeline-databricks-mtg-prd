@@ -24,12 +24,8 @@ from pyspark.sql.types import *
 # CONFIGURAÇÕES GLOBAIS
 # =============================================================================
 
-# GET /migrations é o único endpoint de catálogo da Stage que pagina de
-# verdade (has_more/next_page) - sets e symbology devolvem tudo em 1 request.
-# Sem filtro temporal (YEARS_BACK): migrations é o histórico de reconciliação
-# de scryfall_id (merge/delete) referenciado por oracle_id/old_scryfall_id -
-# cortar por data quebraria a rastreabilidade de IDs antigos que Bronze/Silver
-# ainda podem precisar resolver, mesmo tratando de cartas antigas.
+# Sem filtro temporal: migrations é o histórico de merge/delete de scryfall_id,
+# e Bronze/Silver podem precisar resolver IDs antigos.
 SCRYFALL_API_URL = get_secret("scryfall_api_url")
 SCRYFALL_HEADERS = {"User-Agent": "MTGPipeline/1.0"}
 MAX_RETRIES = int(get_secret("max_retries", "3"))
@@ -61,7 +57,7 @@ MIGRATIONS_SCHEMA = StructType(
         StructField("old_scryfall_id", StringType(), True),
         StructField("new_scryfall_id", StringType(), True),  # só presente em "merge"
         StructField("note", StringType(), True),
-        # metadata.* flattenado - objeto fixo (não é lista, não precisa de JSON)
+        # metadata.* achatado em colunas
         StructField("metadata_id", StringType(), True),
         StructField("metadata_lang", StringType(), True),
         StructField("metadata_name", StringType(), True),
@@ -90,8 +86,7 @@ def _to_migration_record(m):
     }
 
 def fetch_all_migrations():
-    # único endpoint da Stage com paginação real (has_more/next_page) - segue
-    # next_page até a Scryfall devolver has_more=false.
+    # Endpoint paginado: segue next_page até has_more=false.
     records = []
     url = f"{SCRYFALL_API_URL}/migrations"
     while url:
@@ -130,8 +125,7 @@ print("Setup concluído com sucesso")
 
 # Iniciar ingestão de migrations
 
-# Controle de execução (run_id, status, contagens) via run_stage_ingestion -
-# padroniza o wrapper start_run -> try/ingest -> finish_run - ver ingestion_utils.py
+# Executa com controle de execução (ver run_stage_ingestion em ingestion_utils.py)
 migrations_df, run = run_stage_ingestion("migrations", "migrations", ingest_migrations, S3_BASE_PATH)
 
 # Gerar relatório

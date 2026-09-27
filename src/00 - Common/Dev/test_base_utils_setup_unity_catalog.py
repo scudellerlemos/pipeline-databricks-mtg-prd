@@ -1,6 +1,5 @@
-# ponytail: o retorno bool antigo era ignorado por todos os call sites, entao uma
-# falha de USE/CREATE SCHEMA virava print + notebook seguindo em frente e task
-# verde sem escrita. Estes testes travam a propagacao da excecao.
+# setup_unity_catalog precisa propagar a excecao: se engolir, o notebook segue
+# e a task termina verde sem ter escrito nada.
 
 import importlib.util
 import os
@@ -42,8 +41,7 @@ def test_schema_failure_propagates():
 
 
 def test_catalog_failure_propagates():
-    # USE CATALOG falha e o CREATE CATALOG de fallback tambem - nada a fazer,
-    # tem que estourar em vez de seguir pro CREATE SCHEMA.
+    # USE e CREATE CATALOG falham: estoura sem chegar no CREATE SCHEMA.
     spark = _with_spark(_FakeSpark(fail_on=("CATALOG",)))
     try:
         base_utils.setup_unity_catalog("mtg_dev", "bronze")
@@ -55,9 +53,7 @@ def test_catalog_failure_propagates():
 
 
 def test_creates_catalog_when_use_fails():
-    # Caminho normal de primeira carga: USE CATALOG falha porque o catalog nao
-    # existe, e o fallback tem que tentar o CREATE CATALOG IF NOT EXISTS
-    # antes de desistir.
+    # Catalog inexistente: USE CATALOG falha e o fallback tenta CREATE CATALOG IF NOT EXISTS.
     spark = _with_spark(_FakeSpark(fail_on=("USE CATALOG mtg_dev",)))
     try:
         base_utils.setup_unity_catalog("mtg_dev", "bronze")

@@ -1,8 +1,6 @@
-# ponytail: exercita as funções reais de ingestion_utils.py diretamente,
-# mesmo padrão de import-by-path de test_base_utils_get_secret.py. dbutils não
-# existe fora de um cluster Databricks, então a escrita do controle em
-# finish_run deve falhar em silêncio (seu próprio try/except) a menos que um
-# dbutils fake seja injetado no módulo.
+# Importa ingestion_utils.py pelo caminho. Sem cluster não há dbutils, então a
+# escrita do controle em finish_run falha em silêncio, a menos que um dbutils
+# fake seja injetado no módulo.
 
 import importlib.util
 import json
@@ -11,10 +9,8 @@ import sys
 import types
 from contextlib import contextmanager
 
-# pyspark não está instalado no CI (nem em pytest local fora de um cluster
-# Databricks) - só o import, nunca chamado pelos testes abaixo (o único uso
-# real, save_to_parquet, não é exercitado aqui). Stub mínimo pra satisfazer
-# o `from pyspark.sql.functions import ...` de nível de módulo.
+# pyspark não está instalado no CI: stub mínimo só pro import de nível de
+# módulo (save_to_parquet não é testado aqui).
 if "pyspark" not in sys.modules:
     pyspark = types.ModuleType("pyspark")
     pyspark_sql = types.ModuleType("pyspark.sql")
@@ -132,8 +128,7 @@ def test_start_run_has_expected_shape():
 
 
 def test_finish_run_without_dbutils_does_not_raise():
-    # Fora de um cluster Databricks (pytest local) dbutils não existe - o
-    # write do controle deve falhar em silêncio, sem mascarar o status real.
+    # Sem dbutils o write do controle falha em silêncio, sem mudar o status.
     run = ingestion_utils.start_run("cards", endpoint="bulk-data/default_cards")
     run["files_written"] = 3
     finished = ingestion_utils.finish_run(run, "s3://test-bucket/stage", "SUCCESS")
@@ -182,9 +177,7 @@ def test_run_stage_ingestion_success_returns_df_and_success_status():
 
 
 def test_run_stage_ingestion_none_df_raises():
-    # Antes isto devolvia (None, run) com status FAILED e a task do job fechava
-    # verde - foi assim que uma escrita nao commitada passou despercebida ate a
-    # Bronze quebrar nela.
+    # Tem que levantar para a task do job falhar.
     try:
         ingestion_utils.run_stage_ingestion("sets", "sets", lambda run: None, "s3://test-bucket/stage")
     except Exception as e:
@@ -194,9 +187,8 @@ def test_run_stage_ingestion_none_df_raises():
 
 
 def test_as_float_converte_int_e_preserva_none():
-    # Bug real: Scryfall devolve mana_value 0 (int) e o schema declara
-    # DoubleType - createDataFrame quebrava com
-    # FIELD_DATA_TYPE_UNACCEPTABLE_WITH_NAME e a Stage inteira nao gravava.
+    # Scryfall pode devolver int (ex.: mana_value 0) e o schema e DoubleType;
+    # createDataFrame rejeita int nesse caso.
     assert ingestion_utils.as_float(0) == 0.0
     assert isinstance(ingestion_utils.as_float(0), float)
     assert isinstance(ingestion_utils.as_float(3), float)
@@ -205,8 +197,8 @@ def test_as_float_converte_int_e_preserva_none():
 
 
 def test_run_stage_ingestion_none_df_propaga_erro_do_save():
-    # save_to_parquet engole a excecao e so registra em run["error"] - a
-    # mensagem tem que chegar no job, senao o motivo real se perde.
+    # save_to_parquet so registra o erro em run["error"]; a mensagem tem que
+    # chegar na excecao do job.
     def ingest_fn(run):
         run["error"] = "S3 timeout"
         return None
@@ -232,10 +224,8 @@ def test_run_stage_ingestion_exception_marks_failed_and_reraises():
 
 
 def test_run_timestamp_e_constante_entre_chamadas():
-    # O bug que isso trava: save_to_parquet chama .write uma vez por particao e
-    # current_timestamp() era reavaliado a cada uma, entao card_prices saia com
-    # 71 carimbos diferentes numa run so - e DT_INGESTAO e metade da chave de
-    # merge da Silver.
+    # save_to_parquet faz um .write por particao; o carimbo tem que ser o mesmo
+    # em todas (DT_INGESTAO faz parte da chave de merge da Silver).
     run = ingestion_utils.start_run("card_prices", "bulk-data/default_cards")
 
     assert ingestion_utils._run_timestamp(run) == ingestion_utils._run_timestamp(run)
@@ -245,10 +235,8 @@ def test_run_timestamp_e_constante_entre_chamadas():
 
 
 def test_env_var_sobrescreve_o_prefixo_de_stage():
-    # Stage nao importa base_utils (camadas separadas, cada uma com seu %run),
-    # entao a precedencia env var > secret > default tem que existir nos dois.
-    # Sem isso o Stage de prd grava no mesmo prefixo de S3 do dev - e Stage
-    # escreve fora do Unity Catalog, entao catalogo diferente nao separa nada.
+    # Stage escreve fora do Unity Catalog: so o caminho no S3 (bucket/prefixo,
+    # via env var) separa os ambientes.
     assert ingestion_utils.config_override("s3_stage_prefix") is None
     os.environ["MTG_S3_STAGE_PREFIX"] = "prod/stage"
     try:
@@ -258,8 +246,8 @@ def test_env_var_sobrescreve_o_prefixo_de_stage():
 
 
 def test_nome_do_parquet_nao_colide_entre_meses_no_mesmo_dia():
-    # sets/card_prices particionam por releaseDate: com so o dia do mes no
-    # nome, a run de 05/10 achava o arquivo de 05/09 e pulava a particao.
+    # sets/card_prices particionam por releaseDate; o nome precisa da data
+    # completa da run pra nao colidir entre meses.
     setembro = ingestion_utils.parquet_file_name(2021, 3, "20260905", "card_prices")
     outubro = ingestion_utils.parquet_file_name(2021, 3, "20261005", "card_prices")
     assert setembro == "2021_03_20260905_card_prices.parquet"

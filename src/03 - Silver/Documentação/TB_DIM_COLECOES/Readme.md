@@ -9,7 +9,7 @@
 ## 1. Nome da Tabela e Camada
 - **Tabela:** TB_DIM_COLECOES
 - **Camada:** Silver
-- **Classificação DAMA-DMBOK (#116):** Dimensão - descreve a entidade de negócio "coleção/edição" (nome, tipo, data de lançamento, bloco...), referenciada por `COD_COLECAO` a partir de `TB_FATO_CARTAS`. Não é uma lista de domínio estática pequena (REF): cresce a cada lançamento, por isso `TB_DIM_` e não `TB_REF_`.
+- **Classificação DAMA-DMBOK:** Dimensão - descreve a entidade de negócio "coleção/edição" (nome, tipo, data de lançamento, bloco...), referenciada por `COD_COLECAO` a partir de `TB_FATO_CARTAS`. Não é uma lista de domínio estática pequena (REF): cresce a cada lançamento, por isso `TB_DIM_` e não `TB_REF_`.
 
 ## 2. Descrição Completa
 Tabela Silver contendo os dados limpos e transformados de conjuntos (sets/edições) do Magic: The Gathering, processados a partir da camada Bronze, com aplicação de regras de negócio, limpeza de dados e padronização para análises de lançamento e coleção.

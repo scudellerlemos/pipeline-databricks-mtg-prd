@@ -1,7 +1,6 @@
 resources:
   jobs:
-    # Job proprio: so roda depois que a Silver termina inteira, controlado
-    # pelo orquestrador (MTG_PIPELINE).
+    # Roda depois da Silver inteira; a ordem fica com o orquestrador (MTG_PIPELINE).
     MTG_GOLD:
       name: MTG_GOLD
       description: "Camada Gold do pipeline de Magic: The Gathering"
@@ -16,10 +15,8 @@ resources:
         - job_cluster_key: Job_cluster
           new_cluster:
             spark_version: "15.4.x-scala2.12"
-            # Instance pool mtg-pipeline-pool-dbr154: o runtime 15.4 ja vem
-            # pre-carregado (preloaded_spark_versions), o cluster nao instala o
-            # Spark ao subir. min_idle_instances=0: fora da janela de 10 min de
-            # idle a instancia on-demand ainda e provisionada na hora.
+            # Pool mtg-pipeline-pool-dbr154: runtime 15.4 pre-carregado. Com
+            # min_idle_instances=0, fora dos 10 min de idle a instancia e provisionada na hora.
             instance_pool_id: "0925-163505-peep89-pool-mgfqrcwi"
             driver_instance_pool_id: "0925-163505-peep89-pool-mgfqrcwi"
             autoscale:

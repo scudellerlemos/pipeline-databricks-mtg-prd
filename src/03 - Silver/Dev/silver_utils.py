@@ -3,16 +3,12 @@
 # SILVER UTILS - Módulo de Funções Utilitárias para Camada Silver
 # ============================================================================
 """
-Módulo centralizado com funções utilitárias (config, extract, load) para
-scripts da camada Silver. Transformação de negócio fica em SQL, dentro de
-cada notebook (spark.sql sobre temp views) - este módulo é só orquestração.
+Funções utilitárias (config, extract, load) da camada Silver. A transformação
+de negócio fica em SQL dentro de cada notebook; aqui é só orquestração.
 
-ADAPTADO PARA DATABRICKS NOTEBOOKS:
-- dbutils e spark são disponíveis globalmente nos notebooks
-- SparkSession obtido automaticamente do contexto global
-- Requer infraestrutura comum já carregada no notebook via:
+Requer base_utils carregado antes no notebook:
   %run "../../00 - Common/Dev/base_utils"
-- Use %run ./silver_utils para importar no notebook, DEPOIS do %run acima
+  %run ./silver_utils
 
 EXEMPLO DE USO NO NOTEBOOK:
 
@@ -38,16 +34,12 @@ from delta.tables import DeltaTable
 # ============================================================================
 # INFRAESTRUTURA COMUM (Spark session, Unity Catalog, secrets)
 # get_spark_session / setup_unity_catalog / get_secret vêm de base_utils.py,
-# que o notebook chamador deve importar via %run ANTES deste arquivo (ver
-# docstring acima). Não fazemos %run aninhado aqui: o lint estático de
-# notebooks só resolve %run um nível, então um %run dentro deste arquivo
-# vira texto Python inválido quando inlined por ele.
+# carregado pelo notebook chamador. Sem %run aninhado aqui: o lint de
+# notebooks só resolve %run de um nível.
 #
-# ponytail: %run isola cada arquivo no seu próprio namespace antes de mesclar
-# no notebook chamador - funções definidas AQUI (diferente de código de nível
-# superior do notebook) não enxergam nomes de base_utils.py por esse merge.
-# Puxa do IPython quando isso acontece; fora de um notebook Databricks (ex.:
-# pytest local), get_ipython() é None e o bloco é ignorado.
+# Funções definidas num arquivo %run'd não enxergam nomes de outro arquivo
+# %run'd, então buscamos no namespace do IPython. Fora do Databricks (pytest
+# local) get_ipython() é None e o bloco é ignorado.
 try:
     get_spark_session, get_secret, setup_unity_catalog
 except NameError:
@@ -66,7 +58,7 @@ except NameError:
 # ============================================================================
 def create_manual_config(catalog_name, s3_bucket, s3_silver_prefix=None):
     """
-    Cria configuração manual sem usar secrets (para testes/desenvolvimento)
+    Monta a config da Silver a partir de catalog e bucket informados.
 
     Example:
         config = create_manual_config("meu_catalog", "s3://meu-bucket")
@@ -77,24 +69,16 @@ def create_manual_config(catalog_name, s3_bucket, s3_silver_prefix=None):
         'schema_bronze': "bronze",
         'schema_silver': "silver",
         's3_bucket': s3_bucket,
-        # get_secret e nao a string crua: permite override por ambiente via
-        # MTG_S3_SILVER_PREFIX. O argumento explicito continua vencendo.
+        # Argumento explicito vence; senao usa MTG_S3_SILVER_PREFIX via get_secret.
         's3_silver_prefix': s3_silver_prefix or get_secret("s3_silver_prefix", "silver")
     }
 
 # ============================================================================
 # NORMALIZAÇÃO DE VALOR DE ATRIBUTO
-# Title_Case por palavra + "_" no lugar de espaço + sem acento (ex.:
-# "mana vermelha" -> "Mana_Vermelha"), aplicada via normalizar_valores() só
-# nas colunas de texto categórico/nome (NÃO em Id_/Cod_/Url_ nem em texto
-# livre longo, que têm convenção de case própria - ver docstring de cada
-# tabela). NULL, string vazia e o sentinela 'NA' passam direto, sem
-# Title-casear.
-#
-# ponytail: sem-acento via unicodedata.normalize NFKD + encode ASCII/ignore -
-# idiom padrão do stdlib pra tirar acento de qualquer caractere, em vez de um
-# mapa de tradução digitado à mão (translate()) que só cobre os caracteres
-# que alguém lembrou de listar.
+# Title_Case por palavra, "_" no lugar de espaço e sem acento (ex.:
+# "mana vermelha" -> "Mana_Vermelha"). Usada só em colunas de texto
+# categórico/nome, não em Id_/Cod_/Url_ nem em texto livre longo.
+# NULL, string vazia e o sentinela 'NA' passam sem alteração.
 # ============================================================================
 def _remover_acentos(texto):
     if texto is None:
@@ -122,11 +106,8 @@ def extract_from_bronze(catalog, table_name_bronze):
     """EXTRACT: lê dados da camada Bronze"""
     spark_session = get_spark_session()
     bronze_table = f"{catalog}.bronze.{table_name_bronze}"
-    # Não engolir a exceção aqui: um "return None" silencioso fazia o erro
-    # real (ex.: tabela Bronze inexistente/corrompida) só aparecer 2 camadas
-    # depois, na Gold, como UNRESOLVED_COLUMN sem nenhuma pista da causa. Deixar
-    # propagar mostra a mensagem original (ex.: TABLE_OR_VIEW_NOT_FOUND) direto
-    # no erro da task Silver.
+    # Sem try/except de propósito: erro de leitura (ex.: TABLE_OR_VIEW_NOT_FOUND)
+    # deve derrubar a task Silver com a mensagem original.
     df = spark_session.table(bronze_table)
     print(f"Extraídos {df.count()} registros da Bronze: {bronze_table}")
     return df
@@ -134,27 +115,19 @@ def extract_from_bronze(catalog, table_name_bronze):
 # ============================================================================
 # DOCUMENTAÇÃO NO UNITY CATALOG (mesmo padrão de bronze_utils.py)
 #
-# Duplicada de propósito em vez de extraída pra base_utils.py: função definida
-# num arquivo %run'd não fica visível como variável livre dentro de outro
-# arquivo %run'd (mesma causa do %run isolation citado no topo deste
-# arquivo) - extrair quebraria a chamada em runtime com NameError.
+# Duplicada de propósito: função de um arquivo %run'd não é visível dentro de
+# outro arquivo %run'd (ver nota no topo), então não dá pra mover pra base_utils.
 # ============================================================================
 def _escape_sql_string(value):
-    # Spark SQL não trata '' (dobrar aspas, convenção ANSI) como aspas literal
-    # dentro de um single-quoted string - fecha a string na 1a aspa e abre
-    # outra logo em seguida, virando ParseException. Backslash é o que o
-    # parser aceita (achado real ao rodar Bronze no Databricks).
+    # Spark SQL não aceita '' como aspas literal; o escape é com backslash.
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
 def apply_table_documentation(spark, full_table_name, table_comment=None, column_comments=None):
     """Aplica COMMENT ON TABLE / ALTER COLUMN...COMMENT no Unity Catalog.
 
-    Metadados apenas (não reescreve dado) - seguro rodar em toda execução,
-    inclusive numa tabela já existente e comentada, pra manter em sincronia
-    com silver_column_docs.py sem precisar de uma migração separada. Colunas
-    em column_comments que ainda não existem na tabela são silenciosamente
-    ignoradas.
+    Só metadado (não reescreve dado), então roda em toda execução. Colunas em
+    column_comments que não existem na tabela são ignoradas.
     """
     if table_comment:
         spark.sql(f"COMMENT ON TABLE {full_table_name} IS '{_escape_sql_string(table_comment)}'")
@@ -172,13 +145,9 @@ def apply_table_documentation(spark, full_table_name, table_comment=None, column
 def _declare_primary_key(spark_session, full_table_name, table_name, key_cols):
     """Declara a PRIMARY KEY de key_cols em full_table_name no Unity Catalog.
 
-    Unity Catalog exige NOT NULL na PK mas não enforca unicidade - um único
-    SELECT valida NULOs e duplicatas de uma vez (1 scan da tabela) e propaga
-    RuntimeError com a contagem exata se a premissa de chave única for
-    violada, em vez de derrubar a run com o erro genérico do engine.
-
-    DROP+ADD constraint em vez de só ADD: idempotente entre execuções (ADD
-    CONSTRAINT sem IF NOT EXISTS falharia na 2ª run).
+    Unity Catalog exige NOT NULL na PK mas não garante unicidade, então um
+    SELECT valida nulos e duplicatas antes e levanta RuntimeError com a contagem.
+    DROP + ADD da constraint para ser idempotente entre execuções.
     """
     pk_name = f"pk_{table_name.lower()}"
 
@@ -238,13 +207,11 @@ def save_to_silver(df_final, catalog, schema, table_name, s3_silver_path,
         s3_silver_path (str): caminho/bucket S3 base para Silver (com ou sem "s3://")
         partition_cols (list, optional): colunas para particionamento
         key_column (str or list, optional): coluna(s) chave para merge incremental
-        order_by_col (str, optional): coluna de recência usada para escolher
-            deterministicamente qual linha sobrevive quando o lote tem mais de uma
-            linha para a mesma key_column. Sem ela, duplicatas de chave no
-            lote são resolvidas por dropDuplicates: sobrevive uma linha arbitrária,
-            sem log das descartadas.
+        order_by_col (str, optional): coluna de recência que decide qual linha
+            fica quando o lote tem chave duplicada. Sem ela, usa dropDuplicates
+            (linha arbitrária).
         table_comment (str, optional): descrição de negócio da tabela (ver
-            silver_column_docs.py). Combinada com a sinalização de chave única.
+            silver_column_docs.py). Recebe a nota de chave única ao final.
         column_comments (dict, optional): {nome_coluna: descrição de negócio}
             (ver silver_column_docs.py).
     """
@@ -256,20 +223,16 @@ def save_to_silver(df_final, catalog, schema, table_name, s3_silver_path,
 
     spark_session.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}")
 
-    # Dedup por key_column ANTES de decidir entre primeira carga e merge: a
-    # primeira carga escreve df_final direto (sem MERGE), então se não dedupar
-    # aqui uma key duplicada no batch de ingestão vira duplicata permanente na
-    # tabela - o MERGE de runs seguintes só dedupa o batch novo, nunca limpa
-    # duplicata que já está na tabela.
+    # Dedup antes de tudo: a primeira carga grava sem MERGE, e uma duplicata
+    # gravada ali nunca seria limpa pelos MERGEs seguintes.
     if key_column:
         key_cols = [key_column] if isinstance(key_column, str) else list(key_column)
 
         if order_by_col and order_by_col in df_final.columns:
-            # nulls last é proposital - order_by_col nulo nunca deve vencer um valor
-            # não-nulo mais antigo por acidente.
-            # tie-break: hash das colunas restantes garante escolha determinística mesmo
-            # com order_by_col empatado; ponytail: colisão de hash é possível (não-única),
-            # revisitar com um tie-break natural (ex. coluna de ingestão) se isso doer.
+            # nulls last: order_by_col nulo nunca vence um valor preenchido.
+            # Desempate por hash das demais colunas, para ser determinístico.
+            # Limitação: colisão de hash é possível; se incomodar, desempatar
+            # por uma coluna natural (ex.: de ingestão).
             tie_break_cols = [c for c in df_final.columns if c not in key_cols and c != order_by_col]
             order_cols = [col(order_by_col).desc_nulls_last()]
             if tie_break_cols:
@@ -293,21 +256,18 @@ def save_to_silver(df_final, catalog, schema, table_name, s3_silver_path,
     elif key_column:
         key_cols = [key_column] if isinstance(key_column, str) else list(key_column)
 
-        # comparação de schema é metadado (sem scan de dados) - só visibilidade;
-        # withSchemaEvolution() (abaixo) resolve colunas novas sozinho, remoções/mudanças de tipo
-        # podem falhar o MERGE e aparecem no log em vez de silenciosas
+        # Só loga diferença de schema (metadado, sem scan). Coluna nova entra via
+        # withSchemaEvolution(); remoção ou mudança de tipo pode falhar o MERGE.
         current_cols = set(f.name for f in DeltaTable.forPath(spark_session, delta_path).toDF().schema.fields)
         new_cols = set(df_final.columns)
         if current_cols != new_cols:
-            print(f"⚠️ Schema de {full_table_name} mudou: colunas removidas={sorted(current_cols - new_cols)}, "
+            print(f"Schema de {full_table_name} mudou: colunas removidas={sorted(current_cols - new_cols)}, "
                   f"colunas novas={sorted(new_cols - current_cols)}.")
 
-        # <=> em vez de = : equality nula-segura, senão uma chave nula nunca daria
-        # match e a linha seria reinserida a cada execução (duplicando o dado).
+        # <=> (null-safe): com =, chave nula nunca dá match e seria reinserida a cada run.
         merge_condition = " AND ".join(f"silver.{k} <=> novo.{k}" for k in key_cols)
 
-        # withSchemaEvolution() no merge builder: coluna nova entra sozinha,
-        # sem precisar de migração manual. Exige Delta Lake 3.1+ (DBR 15.2+).
+        # withSchemaEvolution() exige Delta Lake 3.1+ (DBR 15.2+).
         delta_table = DeltaTable.forPath(spark_session, delta_path)
         (
             delta_table.alias("silver")
@@ -328,9 +288,7 @@ def save_to_silver(df_final, catalog, schema, table_name, s3_silver_path,
         f"CREATE TABLE IF NOT EXISTS {full_table_name} USING DELTA LOCATION '{delta_path}'"
     )
 
-    # Comentário de tabela combina a descrição de negócio (table_comment, ver
-    # silver_column_docs.py) com a sinalização de chave única DENTRO da
-    # tabela - quem abre o catalog vê sem precisar ler o notebook.
+    # Comentário da tabela = descrição de negócio + chave única, visível no catalog.
     final_table_comment = table_comment
     key_cols = None
     if key_column:
@@ -385,5 +343,5 @@ class SilverTableProcessor:
             column_comments=column_comments
         )
 
-        print(f"✅ {self.table_name} criada com sucesso!")
+        print(f"{self.table_name} criada com sucesso!")
         print(f"Tabela criada: {self.config['catalog_name']}.{self.config['schema_silver']}.{self.table_name}")

@@ -1,11 +1,6 @@
-# ponytail: DQ que so imprime e DQ que ninguem le - a task fica verde e o
-# numero so existe no log do cluster. Este self-check cobre a decisao de
-# abortar: limite implicito 0, tripwire com numero, e None pra contagem que
-# e esperada ser > 0 (orfaos, ids migrados).
-#
-# gold_utils nao importa aqui (precisa de spark/dbutils vivos do Databricks),
-# entao a funcao sob teste e extraida do arquivo real por exec - se a
-# assinatura ou o contrato mudarem, este teste quebra junto.
+# Testa os limites de run_data_quality_checks: 0 implicito, numero, e None.
+# gold_utils nao importa fora do Databricks, entao o trecho sob teste e
+# extraido do arquivo real e executado com exec.
 
 import io
 import os
@@ -59,7 +54,7 @@ def test_zero_passa():
 
 
 def test_tripwire_passa_no_limite_e_aborta_acima():
-    # a baseline medida (7476) tem que passar; a mudanca de regime, nao.
+    # baseline medida (7476) passa; um salto grande aborta.
     assert run_data_quality_checks(
         FakeSpark({"q": 7476}), "pré-join", {"precos_excluidos_sem_carta": ("q", 12000)}
     ) == {"precos_excluidos_sem_carta": 7476}
@@ -75,14 +70,12 @@ def test_tripwire_passa_no_limite_e_aborta_acima():
 
 
 def test_limite_none_nunca_aborta():
-    # cartas_com_id_migrado so cresce - limite nenhum faria sentido.
     assert run_data_quality_checks(
         FakeSpark({"q": 999999}), "t", {"cartas_com_id_migrado": ("q", None)}
     ) == {"cartas_com_id_migrado": 999999}
 
 
 def test_roda_todas_antes_de_abortar():
-    # descobrir os tres problemas de uma vez vale uma run; um por run, nao.
     spark = FakeSpark({"a": 5, "b": 0, "c": 7})
     try:
         run_data_quality_checks(spark, "t", {"a": "a", "b": "b", "c": "c"})

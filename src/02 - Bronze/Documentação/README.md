@@ -79,8 +79,6 @@ da Silver.
 
 ## Particionamento
 
-Nenhuma tabela Bronze é particionada. O volume atual não justifica, e
-particionar preventivamente sem necessidade real é a complexidade que este
-redesenho removeu (as tabelas antigas particionavam por `RELEASE_YEAR`/
-`RELEASE_MONTH` derivados de um JOIN com `sets` dentro da Bronze - regra de
-negócio que não deveria estar aqui).
+Nenhuma tabela Bronze é particionada: o volume atual não justifica.
+Particionar por ano/mês de lançamento exigiria um JOIN com `sets` dentro da
+Bronze - regra de negócio que não pertence a esta camada.

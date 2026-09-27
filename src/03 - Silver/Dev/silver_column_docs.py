@@ -3,24 +3,16 @@
 # SILVER COLUMN DOCS - comentários de tabela/coluna pro Unity Catalog
 # ============================================================================
 """
-Fonte única dos comentários de tabela e coluna da Silver: usada por
-silver_utils.save_to_silver / SilverTableProcessor.save_silver_table
-(COMMENT ON TABLE / ALTER COLUMN...COMMENT no Unity Catalog). Os READMEs de
-Documentação/ repetem o texto à mão (não são gerados daqui, nada checa
-divergência) - ao mudar uma descrição, atualizar os dois.
+Comentários de tabela e coluna da Silver, aplicados no Unity Catalog por
+save_silver_table. Cada notebook chama get_table_comment(nome) e
+get_column_comments(nome) após %run ./silver_column_docs.
 
-Descrições voltadas pro negócio (o que a coluna significa pra quem consome o
-dado), não pra como ela foi calculada - isso já está no notebook.
-
-Cada notebook de tabela chama get_table_comment(nome)/get_column_comments(nome)
-e repassa pro save_silver_table. Não faz %run aninhado aqui (o lint estático
-só resolve %run um nível) - importar via %run ./silver_column_docs direto no
-notebook, sem dependência de dbutils/spark (é só dado estático), mesmo padrão de
-bronze_column_docs.py.
+Descrições de negócio (o que a coluna significa), não de cálculo.
+Os READMEs de Documentação/ repetem este texto à mão: ao mudar aqui, mudar lá.
 """
 
-# Colunas técnicas presentes nas tabelas Silver (exceto TB_PONTE_CARTA_SIMBOLOS) (linhagem até a Stage/Bronze) -
-# mesma descrição em qualquer tabela, uma vez só aqui.
+# Colunas de linhagem (Stage/Bronze), iguais em todas as tabelas Silver
+# exceto TB_PONTE_CARTA_SIMBOLOS.
 COMMON_COLUMNS = {
     "DT_INGESTAO": "Início da execução da Stage que gravou o registro (mesmo valor em todas as linhas da run).",
     "NME_FONTE": "Fonte de dados de origem ('Scryfall'; 'scryfall' minúsculo só em TB_FATO_CARTAS).",

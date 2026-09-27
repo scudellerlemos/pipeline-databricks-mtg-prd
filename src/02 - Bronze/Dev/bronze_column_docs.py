@@ -3,21 +3,15 @@
 # BRONZE COLUMN DOCS - comentários de tabela/coluna pro Unity Catalog
 # ============================================================================
 """
-Fonte dos comentários de tabela e coluna da Bronze aplicados no Unity Catalog
-por bronze_utils.run_bronze_ingestion (COMMENT ON TABLE / ALTER COLUMN...COMMENT).
-Os READMEs de Documentação/ repetem o mesmo texto à mão (não são gerados
-daqui, nada checa divergência) - ao mudar uma descrição, atualizar os dois.
+Comentários de tabela e coluna da Bronze, aplicados no Unity Catalog por
+run_bronze_ingestion. Importar com %run ./bronze_column_docs no notebook.
 
-Cada notebook de tabela chama get_table_comment(nome)/get_column_comments(nome)
-e repassa pro run_bronze_ingestion. Não faz %run aninhado aqui (o lint estático
-só resolve %run um nível) - importar via %run ./bronze_column_docs direto no
-notebook, sem dependência de dbutils/spark (é só dado estático).
+Os READMEs de Documentação/ repetem este texto à mão: ao mudar uma
+descrição, atualizar os dois.
 """
 
-# Colunas técnicas presentes em toda tabela Bronze (ver Documentação/README.md
-# geral) - mesma descrição em qualquer tabela, uma vez só aqui. Uma tabela
-# pode sobrescrever uma entrada (ex.: "source" significa outra coisa em
-# rulings) declarando a mesma chave em BRONZE_TABLES[tabela]["columns"].
+# Colunas técnicas comuns a toda tabela Bronze. Uma tabela sobrescreve uma
+# entrada declarando a mesma chave em BRONZE_TABLES[tabela]["columns"].
 COMMON_COLUMNS = {
     "ingestion_timestamp": "Início da execução da Stage que gravou o registro (mesmo valor em todas as linhas da run) - distinto do bronze_ingestion_timestamp.",
     "source": "Nome da fonte de dados de origem (ex.: 'scryfall').",
@@ -80,9 +74,7 @@ BRONZE_TABLES = {
             "block": "Bloco de expansão ao qual o set pertence.",
             "icon_svg_uri": "URL do ícone SVG do set.",
             "booster": "Campo legado da magicthegathering.io (lista de booster serializada) sem equivalente na Scryfall - sempre nulo desde a migração pra Scryfall, mantido só por imutabilidade de schema.",
-            # booster_N existia pra explodir a lista "booster" da
-            # magicthegathering.io; a Scryfall não expõe booster, então a
-            # Stage grava sempre nulo (colunas mantidas por imutabilidade).
+            # booster_0..19: legado da magicthegathering.io, sempre nulo.
             **{
                 f"booster_{i}": f"Slot {i} do pacote de booster (legado da magicthegathering.io). Sempre nulo: a Scryfall não expõe booster; coluna mantida só por imutabilidade de schema."
                 for i in range(20)
@@ -130,9 +122,7 @@ BRONZE_TABLES = {
         "comment": "Esclarecimentos oficiais de regras (rulings) publicados pela Wizards/Scryfall pra cartas específicas, ligados por oracle_id. Serve pra responder dúvida de interação entre cartas ou interpretação de regra que o texto da carta sozinho não deixa claro - uma carta pode acumular várias rulings ao longo do tempo.",
         "columns": {
             "oracle_id": "Oracle id da carta a que esta ruling se aplica (mesmo valor para todas as impressões da carta).",
-            # Sobrescreve o COMMON_COLUMNS["source"] genérico: a ruling da
-            # Scryfall traz seu próprio "source" (wotc/scryfall), que o
-            # save_to_parquet da Stage preserva.
+            # Sobrescreve COMMON_COLUMNS["source"]: aqui é o emissor da ruling.
             "source": "Quem emitiu a ruling ('wotc' ou 'scryfall') - não é a fonte de linhagem. Partições gravadas antes da correção têm sempre 'scryfall' (a Stage sobrescrevia a coluna).",
             "published_at": "Data de publicação da ruling.",
             "comment": "Texto da ruling / esclarecimento de regras.",

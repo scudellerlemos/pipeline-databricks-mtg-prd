@@ -1,7 +1,5 @@
-# ponytail: self-check de lógica pura pra _resolve_id_chain() em TB_MOV_MIGRACOES_CARTAS.py.
-# Não dá pra importar o notebook diretamente (é notebook Databricks em formato .py source, e suas outras funções
-# precisam de uma sessão spark viva do Databricks), então isto espelha só a função de
-# resolução de cadeia sob teste.
+# Testa _resolve_id_chain() de TB_MOV_MIGRACOES_CARTAS.py. O notebook não é
+# importável fora do Databricks, então a função é copiada aqui; manter em sincronia.
 
 
 def _resolve_id_chain(direct_map):
@@ -26,18 +24,15 @@ def test_no_migrations():
 
 
 def test_single_merge():
-    # A mergeou em B
     assert _resolve_id_chain({"A": "B"}) == {"A": "B"}
 
 
 def test_chained_merge_resolves_to_final_id():
-    # A mergeou em B, B mergeou em C -> A deve resolver direto pra C
     direct_map = {"A": "B", "B": "C"}
     assert _resolve_id_chain(direct_map) == {"A": "C", "B": "C"}
 
 
 def test_cycle_stops_instead_of_looping_forever():
-    # não deveria acontecer em dado real da Scryfall, mas não pode travar
     direct_map = {"A": "B", "B": "A"}
     resolved = _resolve_id_chain(direct_map)
     assert resolved["A"] in ("A", "B")
@@ -52,9 +47,8 @@ def test_independent_chains_dont_interfere():
 
 
 def _build_direct_map(rows_sorted_by_dt_and_id):
-    """Espelho do loop de construção do direct_map em attach_canonical_id(): as linhas devem
-    chegar pré-ordenadas por (ID_CARTA_ANTIGO, DT_EXECUCAO, ID_MIGRACAO) - igual ao
-    .orderBy() antes do .collect() no notebook."""
+    """Cópia do loop de attach_canonical_id(); espera linhas já ordenadas por
+    (ID_CARTA_ANTIGO, DT_EXECUCAO, ID_MIGRACAO), como o orderBy do notebook."""
     direct_map = {}
     for r in rows_sorted_by_dt_and_id:
         direct_map[r["ID_CARTA_ANTIGO"]] = r["ID_CARTA_NOVO"]
@@ -62,16 +56,12 @@ def _build_direct_map(rows_sorted_by_dt_and_id):
 
 
 def test_direct_map_keeps_most_recent_migration_when_a_card_remerges():
-    # ID_CARTA_ANTIGO "A" migrou duas vezes (re-mesclada depois de já ter
-    # mesclado antes) - ordenado por DT_EXECUCAO, o loop deve ficar com a
-    # migração mais recente (pra "C"), não a mais antiga (pra "B").
     rows_sorted = [
         {"ID_CARTA_ANTIGO": "A", "ID_CARTA_NOVO": "B", "DT_EXECUCAO": "2024-01-01"},
         {"ID_CARTA_ANTIGO": "A", "ID_CARTA_NOVO": "C", "DT_EXECUCAO": "2024-06-01"},
     ]
     assert _build_direct_map(rows_sorted) == {"A": "C"}
-    # ordem invertida na entrada (simula collect() sem orderBy) daria "B" -
-    # por isso quem chama precisa garantir a ordenação antes.
+    # Sem a ordenação, venceria a migração errada.
     assert _build_direct_map(list(reversed(rows_sorted))) == {"A": "B"}
 
 

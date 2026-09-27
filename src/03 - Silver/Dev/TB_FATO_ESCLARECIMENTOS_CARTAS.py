@@ -3,35 +3,18 @@
 # CAMADA SILVER - ESCLARECIMENTOS DE REGRAS - MAGIC: THE GATHERING
 # =============================================================================
 """
-Script Python para processamento da tabela TB_FATO_ESCLARECIMENTOS_CARTAS.
-Transformacao e limpeza de dados da Bronze para Silver.
+TB_FATO_ESCLARECIMENTOS_CARTAS: rulings oficiais, Bronze `rulings` -> Silver.
 
-CLASSIFICACAO DAMA-DMBOK: Fato sem medida (factless fact) - uma linha por
-esclarecimento oficial de regra (ruling) publicado para uma carta, grao de
-evento (publicacao de um esclarecimento), sem medida quantitativa propria.
-Ainda assim e Fato e nao DOM/REF: cresce continuamente (a Wizards publica
-esclarecimento novo a cada carta lancada) e nao e uma lista de opcoes fixa.
+Fato sem medida: uma linha por esclarecimento publicado para uma carta.
 
-CHAVE UNICA - ID_ESCLARECIMENTO (SURROGATE): a Bronze rulings nao traz um id
-proprio de registro (Scryfall so garante oracle_id + source + published_at +
-comment) - ID_ESCLARECIMENTO e gerado por hash determinístico
-(sha2(concat_ws('|', ...), 256)) sobre oracle_id + published_at + comment,
-garantindo o mesmo id em reprocessamentos do mesmo dado e permitindo declarar
-PRIMARY KEY de verdade (coluna sempre NOT NULL, diferente de derivar a chave
-de colunas que podem faltar). `source` (emissor) fica FORA do hash: partições
-antigas da Bronze tem source='scryfall' (a Stage sobrescrevia a coluna) e as
-novas tem o emissor real - com source no hash, o mesmo esclarecimento viraria
-duas linhas; sem ele, o merge por DT_INGESTAO mais recente corrige o emissor.
+Chave unica: ID_ESCLARECIMENTO, surrogate sha2 de oracle_id + published_at +
+comment (a fonte nao tem id proprio). O hash e deterministico, entao
+reprocessar gera o mesmo id. `source` (emissor) fica fora do hash: particoes
+antigas da Bronze tem source='scryfall' e as novas o emissor real; o merge por
+DT_INGESTAO mais recente atualiza o emissor sem duplicar a linha.
 
-REGRA "SEM ( ) { } NO DADO SILVER": DESC_ESCLARECIMENTO e texto de regras
-livre e pode conter parenteses/chaves de notacao de simbolo - mesma
-conversao pra colchete ([...]) usada em TB_FATO_CARTAS, por consistencia em
-toda a camada Silver.
-
-CONVENCAO DE NOME/CASE DE COLUNA (pedido do usuario): mesma de TB_FATO_CARTAS
-(ver docstring de la) - nome de coluna 100% MAIUSCULO, valor de atributo em
-Title_Case por palavra sem acento (normalizar_valor() em silver_utils.py),
-exceto COD_/ID_/URL_* e texto livre longo.
+DESC_ESCLARECIMENTO troca ( ) { } por colchetes, como em TB_FATO_CARTAS.
+Mesma convencao de nome/case de TB_FATO_CARTAS.
 """
 
 # =============================================================================
@@ -79,10 +62,8 @@ def transform_rulings_silver(df):
 
     df.createOrReplaceTempView("_rulings_bronze")
 
-    # CTE _renomeado so traduz Bronze -> PT-BR; o SELECT externo computa o
-    # hash e as transformacoes de negocio. ID_ESCLARECIMENTO e lido de
-    # _renomeado (antes da limpeza de DESC_ESCLARECIMENTO) para manter o
-    # mesmo hash entre reprocessamentos.
+    # _renomeado so traduz Bronze -> PT-BR. O hash usa DESC_ESCLARECIMENTO
+    # original (antes da troca de delimitadores).
     df_final = spark.sql(r"""
         WITH _renomeado AS (
             SELECT
@@ -131,9 +112,6 @@ def transform_rulings_silver(df):
         FROM _renomeado
     """)
 
-    # NME_EMISSOR ja veio mapeado pra 'Wizards'/'Scryfall' nos casos
-    # conhecidos (CASE acima) - normalizar_valor() so afeta o resto (demais
-    # emissores), sem tocar nesses dois literais (nao contem espaco/acento).
     df_final = normalizar_valores(df_final, ["NME_EMISSOR", "NME_FONTE"])
 
     logger.info(f"Transformacao Esclarecimentos de Regras concluida: {df_final.count()} registros")
@@ -143,11 +121,8 @@ def transform_rulings_silver(df):
 # CONFIGURACAO
 # =============================================================================
 
-# Configuracao manual. catalog_name vem do mesmo secret que a Bronze usa
-# (get_secret("catalog_name")).
 config = create_manual_config(get_secret("catalog_name"), get_secret("s3_bucket"))
 
-# Setup Unity Catalog
 setup_unity_catalog(config['catalog_name'], config['schema_silver'])
 
 # COMMAND ----------
@@ -155,17 +130,12 @@ setup_unity_catalog(config['catalog_name'], config['schema_silver'])
 # =============================================================================
 # PROCESSAMENTO USANDO SILVER_UTILS
 # =============================================================================
-# Criar processor
 processor = SilverTableProcessor("TB_FATO_ESCLARECIMENTOS_CARTAS", config)
 
-# Extracao da Bronze (nome real da tabela no catalog, minusculo)
 df_bronze = processor.extract_from_bronze("rulings")
 
-# Aplicar transformacao especifica
 df_silver = processor.transform_data(df_bronze, transform_rulings_silver)
 
-# Salvar na Silver com merge incremental por ID_ESCLARECIMENTO (surrogate
-# hash - ver docstring da celula anterior)
 processor.save_silver_table(
     df_silver,
     partition_cols=["ANO_PUBLICACAO", "MES_PUBLICACAO"],

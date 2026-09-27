@@ -1,13 +1,11 @@
 name: Deploy produção (MTG)
 
-# ATENCAO: este arquivo NAO roda no repo de dev. A cada merge na main que
-# toca codigo, o promote.yml de la copia o snapshot do codigo pro repo de producao (pipeline-databricks-mtg-prd) e poe
-# este arquivo em .github/workflows/deploy-prd.yml. Ele fica versionado no dev
-# porque o desenho dos jobs de prod passa pela mesma revisao que o codigo.
+# Este arquivo NAO roda no repo de dev. O promote.yml copia o codigo pro repo
+# de producao (pipeline-databricks-mtg-prd) e coloca este arquivo em
+# .github/workflows/deploy-prd.yml de la. Fica versionado aqui pra ser revisado junto com o codigo.
 #
-# Os jobs de prod leem o codigo DO REPO DE PRODUCAO, nunca do de dev: la o dev
-# tem liberdade de apagar tag, dar force-push, ate apagar o repo, e nada disso
-# pode derrubar producao. O que roda aqui so muda por uma promocao.
+# Os jobs de prod leem o codigo do repo de producao, nunca do de dev: o que
+# roda em prod so muda por uma promocao.
 
 on:
   repository_dispatch:
@@ -23,22 +21,21 @@ on:
         type: boolean
         default: false
 
-# Dois deploys de prod simultaneos deixariam metade dos jobs numa tag e
-# metade noutra. Nao cancela o que ja esta rodando: um deploy pela metade e
-# pior que um deploy velho.
+# Um deploy por vez, sem cancelar o que esta rodando: deploy interrompido
+# deixa parte dos jobs numa tag e parte noutra.
 concurrency:
   group: deploy-prd
   cancel-in-progress: false
 
 env:
-  # Este proprio repo: o codigo chega aqui pela promocao, nao e lido do dev.
+  # O proprio repo de producao (o codigo chega pela promocao).
   CODE_REPO: ${{ github.repository }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # Environment separado do de dev: outros secrets. Sem required reviewer:
-    # o merge na main ja e a decisao de publicar.
+    # Environment proprio (secrets de prd). Sem required reviewer: o merge na main
+    # ja e a decisao de publicar (ADR-007).
     environment: Databricks-Prod
 
     steps:
@@ -56,16 +53,15 @@ jobs:
         with:
           python-version: '3.11'
 
-      # Dependencias vem do codigo publicado, num arquivo so com o CI de dev.
+      # Mesmo arquivo de dependencias do CI de dev.
       - name: Instalar dependências
         run: pip install -r .github/requirements-ci.txt
 
-      # CLI nova (binario Go) pinada na mesma versao do repo de codigo.
+      # CLI nova (binario Go), mesma versao do CI de dev.
       - name: Instalar Databricks CLI
         uses: databricks/setup-cli@v1.16.1
 
-      # Ja passou no CI de dev, mas producao revalida o que de fato chegou
-      # aqui - inclusive num rollback pra uma tag antiga.
+      # Revalida o codigo da tag, inclusive em rollback pra uma tag antiga.
       - name: Revalidar o código promovido
         run: |
           python .github/scripts/validate_dag.py
@@ -76,33 +72,25 @@ jobs:
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
-          # Knobs do deploy: mexem no job, nao chegam no cluster.
+          # Configuram o job; nao vao pro cluster.
           MTG_JOB_SUFFIX: "_PRD"
           MTG_GIT_URL: "https://github.com/${{ env.CODE_REPO }}"
           MTG_GIT_TAG: ${{ steps.alvo.outputs.tag }}
           MTG_PAUSE_STATUS: "UNPAUSED"
-          # Destino do on_failure injetado em todo job. Sem isso a run mensal
-          # de producao falha as 6h da segunda e ninguem fica sabendo.
+          # Email do alerta on_failure de todos os jobs.
           MTG_ALERT_EMAIL: ${{ vars.MTG_ALERT_EMAIL }}
-          # Config do ambiente: o deploy.py injeta tudo que comeca com MTG_ e
-          # nao e knob em spark_env_vars, e get_secret() no notebook resolve
-          # env var > secret > default. Por isso NAO existe scope de prd: o
-          # scope "mtg-pipeline" guarda a config de dev (bucket .../dev, URL da
-          # API, retries) e o que prd muda esta aqui, versionado.
+          # Config do ambiente: vai pro spark_env_vars e get_secret() prioriza
+          # env var sobre o secret scope. Nao ha scope de prd: o "mtg-pipeline"
+          # tem a config de dev e o que prd sobrescreve fica aqui.
           MTG_ENVIRONMENT: "production"
           MTG_CATALOG_NAME: "mtg_prod"
-          # O ambiente ja esta no bucket, nao nos prefixos: dev grava em
-          # s3://magicthegatheringdev/dev/{stage,bronze,silver,gold} e o
-          # storage root do mtg_prod e .../prd, coberto pela external location
-          # mtg-uc-location-prd. Trocar so o bucket mantem os prefixos iguais
-          # nos dois ambientes e cai dentro do que o UC concedeu.
+          # O ambiente fica no caminho do bucket (.../dev ou .../prd); os prefixos
+          # de camada sao iguais. .../prd e coberto pela external location mtg-uc-location-prd.
           MTG_S3_BUCKET: "s3://magicthegatheringdev/prd"
         run: python .github/scripts/deploy.py
 
-      # O passo que faltava: sobe um cluster com a config de prd, confere que
-      # MTG_CATALOG_NAME chegou de verdade no spark_env_vars, grava e le no
-      # mtg_prod e cria os schemas do medalhao. Ate existir, "producao
-      # deployada" queria dizer so "as settings do job estao certas".
+      # Sobe um cluster com a config de prd, confere MTG_CATALOG_NAME no cluster,
+      # grava e le no mtg_prod e cria os schemas do medalhao.
       - name: Smoke test em produção
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
@@ -130,10 +118,8 @@ jobs:
             echo "- Alerta de falha: \`${MTG_ALERT_EMAIL:-NÃO CONFIGURADO}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Codigo novo em prd reprocessa na hora, em vez de esperar a carga
-      # mensal. Silver faz MERGE com dedup, entao rodar a mais nao duplica.
-      # --no-wait: a carga leva mais que o deploy; falha avisa pelo e-mail
-      # de alerta do job, nao por aqui.
+      # Opcional: reprocessa na hora em vez de esperar a carga mensal (Silver faz
+      # MERGE com dedup, nao duplica). --no-wait: falha chega pelo email de alerta do job.
       - name: Rodar o pipeline em produção
         if: github.event.client_payload.rodar == true || inputs.rodar == true
         env:

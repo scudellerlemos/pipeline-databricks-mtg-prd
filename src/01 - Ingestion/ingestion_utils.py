@@ -6,14 +6,9 @@
 Uso no notebook (Databricks):
     %run ./ingestion_utils
 
-Consolida o boilerplate compartilhado pelos 6 notebooks da Stage. Nome do
-arquivo de staging inclui o dia da execução, então cada run diário grava seu
-próprio arquivo em vez de "pular" o mês inteiro assim que o primeiro arquivo
-daquele mês existisse.
-
-Escopo desta camada (Stage): coleta da API Scryfall + validação da ingestão +
-persistência em S3 + controle de execução. Sem CDC (a origem é uma API sem
-mecanismo de captura de alteração) e sem regra de negócio - isso é Bronze/Silver.
+Código compartilhado pelos 6 notebooks da Stage: coleta da API Scryfall,
+gravação em Parquet no S3 e controle de execução. Sem CDC (a API não tem
+captura de alteração) e sem regra de negócio - isso fica na Bronze/Silver.
 """
 
 import json
@@ -25,12 +20,9 @@ from datetime import datetime, timezone
 import requests
 from pyspark.sql.functions import coalesce, col, lit, current_timestamp, year, month, when
 
-# ponytail: em Serverless + Git source, %run às vezes executa este arquivo num
-# namespace que não herda o `dbutils` implícito do notebook. Puxa do IPython
-# quando isso acontece; fora de um notebook Databricks (ex.: pytest local),
-# get_ipython() é None e o bloco é ignorado, preservando o NameError esperado
-# pelos testes locais (ver test_ingestion_utils.py -
-# test_finish_run_without_dbutils_does_not_raise).
+# Em Serverless + Git source, o %run pode executar este arquivo num namespace
+# sem o `dbutils` do notebook; nesse caso pega do IPython. Fora do Databricks
+# (pytest local) o bloco não faz nada e `dbutils` segue indefinido.
 try:
     dbutils
 except NameError:
@@ -42,21 +34,18 @@ except NameError:
 
 
 def config_override(secret_name):
-    """Valor por ambiente, vindo de env var, ou None.
+    """Valor da env var MTG_<NOME>, ou None.
 
-    Stage nao importa base_utils (camadas separadas, cada uma com seu %run),
-    entao a precedencia env var > secret > default precisa existir aqui
-    tambem - senao o Stage de prd grava no prefixo de S3 do dev.
+    Mesma precedencia do base_utils (env var > secret > default), duplicada
+    aqui porque o Stage nao importa base_utils.
     """
     return os.environ.get("MTG_" + secret_name.upper()) or None
 
 
 def _bucket_sem_esquema(secret_name, value):
-    """s3_bucket sem "s3://" - os notebooks montam f"s3://{bucket}/...".
+    """Tira o "s3://" do s3_bucket - os notebooks montam f"s3://{bucket}/...".
 
-    Espelho de base_utils._bucket_sem_esquema: o Stage nao importa base_utils,
-    e foi exatamente o Stage que caiu com "s3://s3://..." na primeira carga
-    de producao.
+    Copia de base_utils._bucket_sem_esquema (o Stage nao importa base_utils).
     """
     if secret_name == "s3_bucket" and value.startswith("s3://"):
         return value[len("s3://"):]
@@ -91,18 +80,14 @@ def setup_s3_storage(base_path):
         print("Diretório do S3 criado com sucesso")
         return True
     except Exception as e:
-        # ponytail: propaga a exceção real (credencial/IAM/path inválido) em vez
-        # de engolir e devolver False - o chamador só sabia dizer "falhou", nunca por quê.
+        # Propaga a causa real (credencial/IAM/path inválido).
         raise Exception(f"Erro ao configurar S3 storage em '{base_path}': {e}")
 
 
 def http_get_with_retry(url, headers=None, timeout=30, retries=3):
     """
-    GET com retry/backoff para 429 (rate limit) e 5xx (indisponibilidade) -
-    nenhum request feito direto pelos notebooks (bulk-data/sets da Scryfall)
-    tinha isso antes: uma falha transitória derrubava a run inteira sem
-    tentar de novo. 4xx (exceto 429) não tem retry - erro do cliente, tentar
-    de novo não muda o resultado.
+    GET com retry/backoff para timeout/erro de conexão, 429 (rate limit) e 5xx. Demais 4xx
+    falham na hora - erro do cliente, repetir não muda o resultado.
     """
     last_error = None
     for attempt in range(retries):
@@ -136,9 +121,8 @@ def http_get_with_retry(url, headers=None, timeout=30, retries=3):
 
 def get_scryfall_set_codes_since(scryfall_api_url, headers, cutoff_date_str, retries=3):
     """
-    Códigos (lowercase) das coleções lançadas a partir de cutoff_date_str,
-    segundo o /sets da Scryfall - 1 request só, devolve o catálogo inteiro
-    (não segue next_page, ao contrário do fetch_all_sets de sets.py).
+    Códigos (minúsculos) das coleções lançadas a partir de cutoff_date_str.
+    Faz 1 request ao /sets da Scryfall, sem seguir next_page.
     """
     response = http_get_with_retry(f"{scryfall_api_url}/sets", headers=headers, retries=retries)
     all_sets = response.json()["data"]
@@ -151,9 +135,10 @@ def get_scryfall_set_codes_since(scryfall_api_url, headers, cutoff_date_str, ret
 
 
 def as_float(valor):
-    """A Scryfall manda inteiro (ex.: mana_value 0) em campos que o schema
-    declara Double/Float, e createDataFrame rejeita int em DoubleType com
-    FIELD_DATA_TYPE_UNACCEPTABLE_WITH_NAME. Converte preservando None.
+    """Converte para float, preservando None.
+
+    A Scryfall pode mandar int (ex.: mana_value 0) em campos Double/Float do
+    schema, e createDataFrame rejeita int em DoubleType.
     """
     return float(valor) if valor is not None else None
 
@@ -165,11 +150,9 @@ def parquet_file_name(partition_year, partition_month, run_date_str, table_name)
 def _run_timestamp(run):
     """Carimbo unico da execucao, como literal Python.
 
-    ponytail: NAO trocar por current_timestamp() - save_to_parquet chama .write
-    uma vez por particao (loop abaixo) e o Spark reavalia a expressao a cada
-    action, entao card_prices saia com 71 carimbos diferentes numa run so (1 por
-    mes de releaseDate). Um literal e avaliado uma vez e sobrevive a todas as
-    escritas. Mesmo padrao da Bronze com lit(run["run_id"]).
+    Nao usar current_timestamp(): save_to_parquet faz um .write por particao e
+    o Spark reavalia a expressao a cada action, gerando carimbos diferentes na
+    mesma run. O literal e o mesmo em todas as escritas.
     """
     if run and run.get("started_at"):
         return datetime.fromisoformat(run["started_at"])
@@ -192,8 +175,8 @@ def save_to_parquet(spark, data, table_name, base_path, schema=None,
     try:
         df = spark.createDataFrame(data, schema) if schema else spark.createDataFrame(data)
 
-        # `source` de origem (ex.: rulings traz 'wotc'/'scryfall' = quem emitiu)
-        # e preservado; so vira 'scryfall' quando a fonte nao traz o campo.
+        # Preserva o `source` que vem no dado (ex.: rulings: 'wotc'/'scryfall');
+        # usa 'scryfall' quando a fonte nao traz o campo.
         source = coalesce(col("source"), lit("scryfall")) if "source" in df.columns else lit("scryfall")
         df = df.withColumn("ingestion_timestamp", lit(_run_timestamp(run))) \
                .withColumn("source", source) \
@@ -228,11 +211,8 @@ def save_to_parquet(spark, data, table_name, base_path, schema=None,
                 (col("partition_year") == partition_year) & (col("partition_month") == partition_month)
             )
 
-            # Nome = partição + data COMPLETA da execução (YYYYMMDD): um arquivo
-            # por run diário. Só o dia do mês colidia entre meses em sets/
-            # card_prices (partição por releaseDate): a run de 05/10 achava o
-            # arquivo de 05/09 e pulava a partição.
-            # Cada tabela grava na sua própria pasta em base_path/{table_name}/.
+            # Um arquivo por partição por dia de execução (data completa YYYYMMDD
+            # no nome), em base_path/{table_name}/. Se já existe, pula.
             file_name = parquet_file_name(partition_year, partition_month, run_date_str, table_name)
             file_path = f"{base_path}/{table_name}/{file_name}"
 
@@ -266,10 +246,8 @@ def save_to_parquet(spark, data, table_name, base_path, schema=None,
 # ============================================================================
 # CONTROLE DE EXECUÇÃO
 # ============================================================================
-# Um JSON por run em {base_path}/_control/{table_name}/{run_id}.json - simples
-# o bastante pra auditar (listar a pasta) sem precisar de uma tabela Delta só
-# pra isso. Cobre run_id, endpoint, parâmetros, início/fim, contagens,
-# status e erro (seção 8 do pedido de refatoração da Stage).
+# Um JSON por run em {base_path}/_control/{table_name}/{run_id}.json com
+# run_id, endpoint, parâmetros, início/fim, contagens, status e erro.
 
 def start_run(table_name, endpoint, params=None):
     return {
@@ -302,7 +280,7 @@ def finish_run(run, base_path, status, error=None):
         dbutils.fs.mkdirs(control_dir)
         dbutils.fs.put(control_path, json.dumps(run, default=str), overwrite=True)
     except Exception as e:
-        # O controle de execução é observabilidade, não deve mascarar o resultado real da run.
+        # Falha ao gravar o controle não deve mudar o resultado da run.
         print(f"Aviso: falha ao gravar controle de execução em {control_path}: {e}")
 
     print(
@@ -316,22 +294,17 @@ def finish_run(run, base_path, status, error=None):
 
 def run_stage_ingestion(table_name, endpoint, ingest_fn, base_path, params=None):
     """
-    Padroniza o wrapper start_run -> try/ingest_fn -> finish_run repetido
-    quase byte-a-byte nos 6 notebooks de Stage (cards/sets/card_prices/
-    symbology/rulings/migrations). ingest_fn é chamado como ingest_fn(run) e
-    deve devolver o DataFrame gravado; None significa que nada foi gravado e
-    levanta - o job precisa ficar vermelho. Devolve (df, run) - o relatório
-    impresso ao final continua no notebook, já que o conteúdo varia por tabela.
+    Roda start_run -> ingest_fn(run) -> finish_run, usado pelos 6 notebooks da Stage.
+
+    ingest_fn deve devolver o DataFrame gravado; None levanta exceção para o
+    job falhar. Devolve (df, run).
     """
     run = start_run(table_name, endpoint=endpoint, params=params)
     try:
         print(f"Iniciando ingestão de {table_name}...")
         df = ingest_fn(run)
         if df is None:
-            # O status ja era FAILED aqui, mas a funcao retornava normalmente e
-            # a task do job fechava verde. Foi assim que uma escrita que nao
-            # commitou ficou no S3 sem ninguem ver, ate a Bronze quebrar nela.
-            # O except abaixo cuida do finish_run(FAILED).
+            # Levanta para a task do job falhar; o except abaixo grava FAILED.
             raise Exception(
                 f"Ingestao de {table_name} nao gravou nada: {run.get('error') or 'sem dados'}"
             )

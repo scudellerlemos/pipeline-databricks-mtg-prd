@@ -3,20 +3,16 @@
 # BASE UTILS - Funções compartilhadas entre as camadas Bronze, Silver e Gold
 # ============================================================================
 """
-Módulo base com infraestrutura comum aos notebooks de Bronze, Silver, Gold e ao
-smoke_deploy: sessão Spark, Unity Catalog e leitura de secrets.
+Infraestrutura comum aos notebooks de Bronze, Silver, Gold e ao smoke_deploy:
+sessão Spark, Unity Catalog e leitura de secrets.
 
-ADAPTADO PARA DATABRICKS NOTEBOOKS:
-- dbutils e spark são disponíveis globalmente nos notebooks
-- Bronze/Silver/Gold carregam via %run "../../00 - Common/Dev/base_utils";
-  o smoke_deploy (mesma pasta) via %run ./base_utils
+Carregado via %run "../../00 - Common/Dev/base_utils" (smoke_deploy usa
+%run ./base_utils). dbutils e spark vêm do escopo global do notebook.
 """
 
-# ponytail: em Serverless + Git source, %run às vezes executa este arquivo num
-# namespace que não herda o `dbutils` implícito do notebook. Puxa do IPython
-# quando isso acontece; fora de um notebook Databricks (ex.: pytest local),
-# get_ipython() é None e o bloco é ignorado, preservando o NameError esperado
-# pelos testes locais (ver test_base_utils_get_secret.py).
+# Em Serverless + Git source, o %run pode rodar este arquivo sem o `dbutils`
+# do notebook; nesse caso pega do IPython. Fora do Databricks (pytest local)
+# o bloco não faz nada e dbutils continua indefinido.
 import os
 
 try:
@@ -30,27 +26,19 @@ except NameError:
 
 
 def config_override(secret_name):
-    """Valor por ambiente, vindo de env var, ou None.
+    """Valor da env var MTG_<SECRET_NAME>, ou None.
 
-    dev e prd dividem workspace E scope de secret: o scope guarda a config de
-    dev (incluindo o bucket .../dev). O que prd muda (catalogo, bucket) chega como env var
-    injetada em spark_env_vars pelo deploy.py, entao a config de producao fica
-    versionada no workflow em vez de invisivel num scope.
-
-    Precedencia: env var > secret > default do codigo. Nenhuma dessas chaves e
-    segredo de verdade - sao config - por isso duplicar o scope inteiro so pra
-    mudar dois valores (catalogo e bucket) seria criar nove valores pra manter em sincronia na mao.
+    dev e prd dividem o mesmo secret scope (com a config de dev). O que prd
+    muda (catalogo, bucket) chega como env var, injetada pelo deploy.py em
+    spark_env_vars. Precedencia no get_secret: env var > secret > default.
     """
     return os.environ.get("MTG_" + secret_name.upper()) or None
 
 
 def _bucket_sem_esquema(secret_name, value):
-    """s3_bucket sempre sem "s3://", venha de onde vier.
+    """Remove o "s3://" do s3_bucket, venha de onde vier.
 
-    Stage e Bronze montam f"s3://{bucket}/...", Silver e Gold aceitam os dois.
-    Com "s3://" no valor, as duas primeiras gravavam em "s3://s3://..." - foi
-    o que derrubou a primeira carga de producao. Normaliza aqui, por onde
-    todas passam, em vez de ensinar cada notebook.
+    Stage e Bronze montam f"s3://{bucket}/...", entao o valor nao pode trazer o esquema.
     """
     if secret_name == "s3_bucket" and value.startswith("s3://"):
         return value[len("s3://"):]
@@ -58,11 +46,10 @@ def _bucket_sem_esquema(secret_name, value):
 
 
 def _barra_catalogo_de_dev_em_producao(secret_name, value):
-    """Producao nunca pode resolver o catalogo pra mtg_dev.
+    """Falha se producao resolver o catalogo pra mtg_dev.
 
-    ponytail: os dois ambientes vivem no mesmo workspace, entao esquecer de
-    injetar MTG_CATALOG_NAME faria o job de producao gravar por cima das
-    tabelas de desenvolvimento - task verde, dado destruido. Explode aqui.
+    dev e prd estao no mesmo workspace: sem MTG_CATALOG_NAME, o job de
+    producao gravaria nas tabelas de dev.
     """
     if (
         secret_name == "catalog_name"
@@ -97,14 +84,12 @@ def setup_unity_catalog(catalog, schema):
         catalog (str): Nome do catalog
         schema (str): Nome do schema
 
-    Levanta a excecao original se o catalog/schema nao puder ser configurado:
-    nenhum call site checava o retorno antigo, entao engolir a falha aqui
-    deixava o notebook seguir e a task fechar verde sem ter escrito nada.
+    Raises:
+        Exception: a original do Spark, se o catalog/schema nao puder ser configurado.
     """
     spark_session = get_spark_session()
-    # ponytail: tenta USE primeiro - este metastore não tem storage root
-    # default, então CREATE CATALOG sem MANAGED LOCATION falha mesmo com
-    # IF NOT EXISTS quando o catalog já existe (caso normal aqui).
+    # Tenta USE primeiro: o metastore nao tem storage root default, entao
+    # CREATE CATALOG sem MANAGED LOCATION falha mesmo com IF NOT EXISTS.
     try:
         spark_session.sql(f"USE CATALOG {catalog}")
     except Exception:
@@ -119,7 +104,7 @@ def setup_unity_catalog(catalog, schema):
 # ============================================================================
 def get_secret(secret_name, default_value=None, extra_safe_defaults=None):
     """
-    Obtém segredos do Databricks Secret Scope
+    Obtém config: env var MTG_<NOME> > secret do scope "mtg-pipeline" > default.
 
     Args:
         secret_name (str): Nome do secret
@@ -148,9 +133,7 @@ def get_secret(secret_name, default_value=None, extra_safe_defaults=None):
             print(f"Secret '{secret_name}' não encontrado, usando valor padrão: {default_value}")
             return default_value
 
-        # ponytail: s3_bucket não entra em safe_defaults de propósito - é o
-        # destino real de escrita/leitura de todas as camadas, então preferimos
-        # falhar alto a gravar silenciosamente num bucket placeholder inexistente.
+        # s3_bucket não tem default: sem ele o pipeline falha em vez de gravar num bucket errado.
         safe_defaults = {'catalog_name': 'mtg_dev'}
         safe_defaults.update(extra_safe_defaults or {})
 
@@ -158,6 +141,6 @@ def get_secret(secret_name, default_value=None, extra_safe_defaults=None):
             print(f"Secret '{secret_name}' não encontrado, usando valor padrão: {safe_defaults[secret_name]}")
             return _barra_catalogo_de_dev_em_producao(secret_name, safe_defaults[secret_name])
         else:
-            print(f"⚠️ Secret '{secret_name}' não encontrado e sem valor padrão")
-            print(f"💡 Configure o secret no scope ou a env var MTG_<NOME>")
+            print(f"Secret '{secret_name}' não encontrado e sem valor padrão")
+            print(f"Configure o secret no scope ou a env var MTG_<NOME>")
             raise Exception(f"Secret '{secret_name}' not configured and no default available")

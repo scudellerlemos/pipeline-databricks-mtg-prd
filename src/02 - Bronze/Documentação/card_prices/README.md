@@ -16,7 +16,7 @@ cotação "atual".
 - **Tabela Unity Catalog:** `{catalog}.bronze.card_prices`.
 - **Origem (Stage):** tabela `card_prices`, gravada por [`src/01 - Ingestion/card_prices.py`](<../../../01 - Ingestion/card_prices.py>) a partir da API Scryfall (`/bulk-data` → `default_cards`).
 - **Notebook Bronze:** [`../../Dev/card_prices.py`](../../Dev/card_prices.py).
-- **Histórico:** o preço de uma mesma impressão em runs/dias diferentes gera linhas diferentes, todas preservadas - não há filtro por data/período nem `dropDuplicates` por impressão. Nenhuma checagem de consistência contra `cards` acontece aqui (a antiga limpeza cruzada que apagava preços de cartas "ausentes" era regra de negócio e foi removida desta camada).
+- **Histórico:** o preço de uma mesma impressão em runs/dias diferentes gera linhas diferentes, todas preservadas - não há filtro por data/período nem `dropDuplicates` por impressão. Nenhuma checagem de consistência contra `cards` acontece aqui (é regra de negócio, fora da Bronze).
 
 ## Colunas
 

@@ -3,17 +3,13 @@
 # GOLD UTILS - Módulo de Funções Utilitárias para Camada Gold
 # ============================================================================
 """
-Módulo centralizado com funções utilitárias (config, extract, load, auditoria)
-para scripts da camada Gold. Transformação de negócio (join/agregação) fica em
-SQL, dentro de cada notebook (spark.sql sobre temp views) - este módulo é só
-orquestração, mesmo padrão de silver_utils.py.
+Funções utilitárias da camada Gold: config, extract, load e auditoria.
+A transformação de negócio fica em SQL dentro de cada notebook; mesmo padrão
+de silver_utils.py.
 
-ADAPTADO PARA DATABRICKS NOTEBOOKS:
-- dbutils e spark são disponíveis globalmente nos notebooks
-- SparkSession obtido automaticamente do contexto global
-- Requer infraestrutura comum já carregada no notebook via:
+Requer base_utils carregado antes:
   %run "../../00 - Common/Dev/base_utils"
-- Use %run ./gold_utils para importar no notebook, DEPOIS do %run acima
+  %run ./gold_utils
 
 EXEMPLO DE USO NO NOTEBOOK:
 
@@ -36,10 +32,8 @@ from delta.tables import DeltaTable
 
 # ============================================================================
 # INFRAESTRUTURA COMUM (Spark session, Unity Catalog, secrets)
-# ponytail: mesmo mecanismo de fallback via IPython user_ns de silver_utils.py -
-# %run isola cada arquivo no seu próprio namespace antes de mesclar no notebook
-# chamador, então funções de base_utils.py não ficam visíveis aqui por import
-# comum.
+# %run isola o namespace de cada arquivo, então as funções de base_utils.py
+# são buscadas no user_ns do IPython (mesmo esquema de silver_utils.py).
 # ============================================================================
 try:
     get_spark_session, get_secret, setup_unity_catalog
@@ -70,8 +64,7 @@ def create_manual_config(catalog_name, s3_bucket, s3_gold_prefix=None):
         'schema_silver': "silver",
         'schema_gold': "gold",
         's3_bucket': s3_bucket,
-        # get_secret e nao a string crua: permite override por ambiente via
-        # MTG_S3_GOLD_PREFIX. O argumento explicito continua vencendo.
+        # Override por ambiente via MTG_S3_GOLD_PREFIX; o argumento explicito vence.
         's3_gold_prefix': s3_gold_prefix or get_secret("s3_gold_prefix", "gold")
     }
 
@@ -82,33 +75,26 @@ def extract_from_silver(catalog, table_name_silver):
     """EXTRACT: lê dados de uma tabela da camada Silver"""
     spark_session = get_spark_session()
     silver_table = f"{catalog}.silver.{table_name_silver}"
-    # Não engolir a exceção: um "return None" silencioso esconde a causa real
-    # (ex.: tabela Silver renomeada/inexistente) atrás de um erro genérico de
-    # coluna faltando mais adiante no join.
+    # Sem try/except: tabela inexistente deve falhar aqui, com a causa real.
     df = spark_session.table(silver_table)
     print(f"Extraídos {df.count()} registros da Silver: {silver_table}")
     return df
 
 # ============================================================================
-# DOCUMENTAÇÃO NO UNITY CATALOG (mesmo padrão de silver_utils.py)
-#
-# Duplicada de propósito em vez de extraída pra base_utils.py: função definida
-# num arquivo %run'd não fica visível como variável livre dentro de outro
-# arquivo %run'd - extrair quebraria a chamada em runtime com NameError (ver
-# docstring de silver_utils.py).
+# DOCUMENTAÇÃO NO UNITY CATALOG
+# Duplicada de silver_utils.py de propósito: função de um arquivo %run'd não
+# fica visível dentro de outro arquivo %run'd.
 # ============================================================================
 def _escape_sql_string(value):
-    # Spark SQL não trata '' (dobrar aspas) como aspas literal dentro de um
-    # single-quoted string - backslash é o que o parser aceita.
+    # Spark SQL não aceita '' como aspas escapada; usa backslash.
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
 def apply_table_documentation(spark, full_table_name, table_comment=None, column_comments=None):
     """Aplica COMMENT ON TABLE / ALTER COLUMN...COMMENT no Unity Catalog.
 
-    Metadados apenas (não reescreve dado) - seguro rodar em toda execução,
-    inclusive numa tabela já existente e comentada, pra manter em sincronia
-    com gold_column_docs.py sem precisar de uma migração separada.
+    Só metadados: roda em toda execução para manter a tabela em sincronia com
+    gold_column_docs.py.
     """
     if table_comment:
         spark.sql(f"COMMENT ON TABLE {full_table_name} IS '{_escape_sql_string(table_comment)}'")
@@ -126,11 +112,9 @@ def apply_table_documentation(spark, full_table_name, table_comment=None, column
 def _declare_primary_key(spark_session, full_table_name, table_name, key_cols):
     """Declara a PRIMARY KEY de key_cols em full_table_name no Unity Catalog.
 
-    Unity Catalog exige NOT NULL na PK mas não enforca unicidade - um único
-    SELECT valida NULOs e duplicatas de uma vez (1 scan da tabela) e propaga
-    RuntimeError com a contagem exata se a premissa de chave única for
-    violada, em vez de mascarar a chave com valor artificial (nunca fazer
-    isso numa PK/FK - ver silver_utils.py para a mesma regra).
+    Unity Catalog exige NOT NULL na PK mas não garante unicidade, então um
+    SELECT valida nulos e duplicatas antes e levanta RuntimeError com a
+    contagem se houver. A chave nunca é mascarada com valor artificial.
     """
     pk_name = f"pk_{table_name.lower()}"
 
@@ -178,12 +162,8 @@ def save_to_gold(df_final, catalog, schema, table_name, s3_gold_path,
     """
     LOAD: grava df_final na camada Gold (Delta + Unity Catalog).
 
-    Mesma estratégia de save_to_silver (full load na 1a carga, MERGE INTO
-    idempotente por key_column nas seguintes) - Gold aqui é derivada
-    determinística da Silver, então não há necessidade de uma estratégia de
-    carga diferente. Sem order_by_col: a chave de Gold (ID_CARTA, DT_COTACAO)
-    já é única por construção do join (ver docstring do notebook), não há
-    empate de chave a desempatar.
+    Full load na 1a carga, MERGE por key_column nas seguintes (como
+    save_to_silver). Lote com chave duplicada aborta antes de gravar.
 
     Args:
         df_final (DataFrame): DataFrame final para salvar
@@ -206,10 +186,8 @@ def save_to_gold(df_final, catalog, schema, table_name, s3_gold_path,
 
     if key_column:
         key_cols = [key_column] if isinstance(key_column, str) else list(key_column)
-        # A chave da Gold é única por construção do join - duplicata no lote
-        # é bug a montante (PK da Silver quebrada, join que multiplicou). Aborta
-        # ANTES de gravar em vez de descartar em silêncio: dropDuplicates
-        # escolheria uma linha qualquer e esconderia o bug.
+        # Duplicata no lote é bug a montante (PK da Silver ou join): aborta em
+        # vez de dropDuplicates, que esconderia o problema.
         dup_count = df_final.groupBy(*key_cols).count().filter("count > 1").count()
         if dup_count > 0:
             raise RuntimeError(
@@ -234,15 +212,13 @@ def save_to_gold(df_final, catalog, schema, table_name, s3_gold_path,
         current_cols = set(f.name for f in DeltaTable.forPath(spark_session, delta_path).toDF().schema.fields)
         new_cols = set(df_final.columns)
         if current_cols != new_cols:
-            print(f"⚠️ Schema de {full_table_name} mudou: colunas removidas={sorted(current_cols - new_cols)}, "
+            print(f"Schema de {full_table_name} mudou: colunas removidas={sorted(current_cols - new_cols)}, "
                   f"colunas novas={sorted(new_cols - current_cols)}.")
 
-        # <=> em vez de = : equality nula-segura, senão uma chave nula nunca daria
-        # match e a linha seria reinserida a cada execução (duplicando o dado).
+        # <=> (null-safe): com "=", chave nula nunca casa e seria reinserida a cada run.
         merge_condition = " AND ".join(f"gold.{k} <=> novo.{k}" for k in key_cols)
 
-        # withSchemaEvolution() no merge builder: coluna nova entra sozinha,
-        # sem precisar de migração manual. Exige Delta Lake 3.1+ (DBR 15.2+).
+        # withSchemaEvolution(): coluna nova entra sem migração. Exige Delta 3.1+ (DBR 15.2+).
         delta_table = DeltaTable.forPath(spark_session, delta_path)
         (
             delta_table.alias("gold")
@@ -280,9 +256,6 @@ def save_to_gold(df_final, catalog, schema, table_name, s3_gold_path,
 
 # ============================================================================
 # DATA QUALITY E AUDITORIA
-# Não existe helper de auditoria compartilhado (Silver/Gold não têm - só Stage e
-# Bronze têm control table própria, _control/{table}/{run_id}.json, fora do
-# escopo deste módulo) - construído mínimo aqui, direto em Delta/SQL.
 # ============================================================================
 class DataQualityError(RuntimeError):
     """DQ estourou o limite. Carrega .resultados pra auditoria ainda ser gravada."""
@@ -294,22 +267,12 @@ class DataQualityError(RuntimeError):
 
 def run_data_quality_checks(spark_session, rotulo, checks):
     """
-    Roda uma lista de checagens de DQ (cada uma um SELECT que retorna 1 linha/
-    1 coluna com uma contagem), loga o resultado e ABORTA se alguma passar do
-    limite dela.
-
-    Cada valor do dict de checks diz qual e o limite:
+    Roda checagens de DQ (cada uma um SELECT que retorna uma contagem), loga
+    e aborta se alguma passar do limite. Roda todas antes de abortar.
 
         "nome": query                 -> limite 0: qualquer ocorrencia aborta.
-        "nome": (query, 12000)        -> aborta acima de 12000 (tripwire).
-        "nome": (query, None)         -> so loga, contagem esperada e > 0.
-
-    O limite e obrigatorio de pensar porque DQ que so imprime e DQ que ninguem
-    le: a task fica verde e o numero so aparece pra quem for atras do log do
-    cluster, que nem sempre sobrevive.
-
-    Roda TODAS as checagens antes de abortar - saber que tres coisas quebraram
-    de uma vez e mais util do que descobrir uma por run.
+        "nome": (query, 12000)        -> aborta acima de 12000.
+        "nome": (query, None)         -> so loga (contagem esperada > 0).
 
     Args:
         rotulo (str): de onde vem a checagem, so pro log (nome da tabela,
@@ -330,12 +293,12 @@ def run_data_quality_checks(spark_session, rotulo, checks):
         resultados[nome] = contagem
 
         if limite is None:
-            nivel = "ℹ️"
+            nivel = "INFO"
         elif contagem > limite:
-            nivel = "❌"
+            nivel = "FALHA"
             estourados.append(f"{nome}={contagem} (limite {limite})")
         else:
-            nivel = "✅"
+            nivel = "OK"
         print(f"{nivel} DQ [{rotulo}] {nome}: {contagem}")
 
     if estourados:
@@ -346,7 +309,7 @@ def run_data_quality_checks(spark_session, rotulo, checks):
 
 
 def start_audit_run():
-    """Abre um run de auditoria - id único (uuid4) por execução + timestamp de início."""
+    """Abre um run de auditoria: id único (uuid4) + timestamp de início."""
     return {"id_execucao": str(uuid.uuid4()), "dt_inicio": datetime.now()}
 
 
@@ -354,10 +317,9 @@ def record_gold_audit(spark_session, catalog, schema, table_name, audit_run,
                        qtd_lidos, qtd_processados, qtd_inseridos_atualizados,
                        dq_resultados, status):
     """
-    Fecha o run de auditoria e grava 1 linha em `{catalog}.{schema}.TB_AUDITORIA_GOLD`
-    (criada automaticamente na 1a chamada). 1 linha por execução de notebook Gold,
-    inclusive as que abortam (o notebook chama isto num finally), nunca é
-    atualizada depois de gravada (log de execução, não estado).
+    Fecha o run e grava 1 linha em `{catalog}.{schema}.TB_AUDITORIA_GOLD`
+    (criada na 1a chamada). O notebook chama isto num finally, então toda
+    execução é registrada, inclusive as que abortam. Linhas são só inseridas.
     """
     dt_fim = datetime.now()
     duracao_segundos = (dt_fim - audit_run["dt_inicio"]).total_seconds()
@@ -417,7 +379,7 @@ class GoldTableProcessor:
         return extract_from_silver(self.config['catalog_name'], silver_table_name)
 
     def transform_data(self, df, transform_function, **kwargs):
-        """Aplica função de transformação personalizada (lógica em SQL, no notebook)"""
+        """Aplica transform_function ao df (a lógica fica no notebook)."""
         if transform_function:
             return transform_function(df, **kwargs)
         return df
@@ -437,5 +399,5 @@ class GoldTableProcessor:
             column_comments=column_comments
         )
 
-        print(f"✅ {self.table_name} criada com sucesso!")
+        print(f"{self.table_name} criada com sucesso!")
         print(f"Tabela criada: {self.config['catalog_name']}.{self.config['schema_gold']}.{self.table_name}")

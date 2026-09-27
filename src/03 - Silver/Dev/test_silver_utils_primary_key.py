@@ -1,14 +1,10 @@
-# ponytail: self-check de lógica pura pra _declare_primary_key() (silver_utils.py).
-# Não dá pra importar esse módulo diretamente aqui (precisa de pyspark e uma sessão
-# spark/dbutils viva do Databricks, nenhuma disponível fora de um cluster), então isto
-# espelha só a lógica de declaração de PK sob teste, mesma convenção de
-# test_silver_utils_merge_key.py.
+# Testa _declare_primary_key() de silver_utils.py. O módulo exige
+# pyspark/Databricks, então a função é copiada aqui; manter em sincronia.
 
 
 class FakeSpark:
-    """Registra toda chamada spark.sql(); responde o SELECT combinado de
-    contagem de NULL + contagem de duplicata a partir de um map fixo
-    {column: null_count, "__dup_count": n}, o resto é uma chamada DDL no-op."""
+    """Registra as chamadas a spark.sql(). O SELECT de validação devolve
+    {coluna: null_count, "__dup_count": n}; o resto (DDL) não faz nada."""
 
     def __init__(self, null_counts=None, dup_count=0):
         self.row = dict(null_counts or {})
@@ -31,7 +27,7 @@ class _FakeResult:
 
 
 def declare_primary_key(spark, full_table_name, table_name, key_cols):
-    """Espelho de silver_utils._declare_primary_key."""
+    """Cópia de silver_utils._declare_primary_key."""
     pk_name = f"pk_{table_name.lower()}"
 
     null_sums = ", ".join(f"sum(case when `{k}` is null then 1 else 0 end) as `{k}`" for k in key_cols)
@@ -75,7 +71,7 @@ def test_null_key_raises_with_exact_count_and_skips_constraint():
     except RuntimeError as e:
         assert "3 linha(s)" in str(e)
         assert "ID_CARTA" in str(e)
-    # só a query combinada de soma de NULOs foi chamada - nenhum SET NOT NULL/DROP/ADD CONSTRAINT
+    # Nenhum DDL roda depois da falha.
     assert len(spark.calls) == 1
     assert "sum(case when" in spark.calls[0]
 
@@ -83,7 +79,6 @@ def test_null_key_raises_with_exact_count_and_skips_constraint():
 def test_no_null_declares_constraint_in_order():
     spark = FakeSpark(null_counts={"COD_COLECAO": 0})
     declare_primary_key(spark, "cat.silver.TB_DIM_COLECOES", "TB_DIM_COLECOES", ["COD_COLECAO"])
-    # 1 SELECT combinado, SET NOT NULL, DROP CONSTRAINT, ADD CONSTRAINT, nesta ordem.
     assert len(spark.calls) == 4
     assert "sum(case when" in spark.calls[0]
     assert "SET NOT NULL" in spark.calls[1]
@@ -98,7 +93,7 @@ def test_composite_key_checks_all_columns_in_a_single_scan():
         spark, "cat.silver.TB_FATO_PRECOS_CARTAS", "TB_FATO_PRECOS_CARTAS",
         ["ID_CARTA", "DT_INGESTAO"],
     )
-    # 1 SELECT combinado (não 2) + 2 SET NOT NULL + DROP + ADD = 5
+    # 1 SELECT + 2 SET NOT NULL + DROP + ADD
     assert len(spark.calls) == 5
     assert spark.calls[0].count("sum(case when") == 2
     assert "ID_CARTA" in spark.calls[0] and "DT_INGESTAO" in spark.calls[0]
@@ -114,8 +109,6 @@ def test_composite_key_second_column_null_stops_before_any_ddl():
         assert False, "esperava RuntimeError"
     except RuntimeError as e:
         assert "DT_INGESTAO" in str(e)
-    # a checagem falha antes de qualquer SET NOT NULL/DROP/ADD CONSTRAINT rodar,
-    # mesmo com a 1a coluna limpa.
     assert len(spark.calls) == 1
 
 
@@ -127,14 +120,12 @@ def test_duplicate_key_raises_with_exact_count_and_skips_constraint():
     except RuntimeError as e:
         assert "2 linha(s) duplicada(s)" in str(e)
         assert "COD_COLECAO" in str(e)
-    # a checagem de NULO passa, mas a de duplicidade já bloqueia antes de qualquer DDL.
     assert len(spark.calls) == 1
 
 
 def test_dup_count_expr_uses_distinct_key_concat_in_the_same_scan():
     spark = FakeSpark(null_counts={"COD_COLECAO": 0}, dup_count=0)
     declare_primary_key(spark, "cat.silver.TB_DIM_COLECOES", "TB_DIM_COLECOES", ["COD_COLECAO"])
-    # NULO e duplicidade saem da mesma query combinada (1 scan), não de 2 queries.
     assert len(spark.calls) == 4
     assert "count(distinct concat_ws(" in spark.calls[0]
     assert "__dup_count" in spark.calls[0]

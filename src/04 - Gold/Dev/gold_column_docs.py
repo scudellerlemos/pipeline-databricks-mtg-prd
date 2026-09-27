@@ -3,13 +3,10 @@
 # GOLD COLUMN DOCS - comentários de tabela/coluna pro Unity Catalog
 # ============================================================================
 """
-Fonte única dos comentários de tabela e coluna da Gold: usada por
-gold_utils.save_to_gold / GoldTableProcessor.save_gold_table (COMMENT ON
-TABLE / ALTER COLUMN...COMMENT no Unity Catalog) - mesmo padrão de
-silver_column_docs.py.
+Comentários de tabela e coluna da Gold, aplicados no Unity Catalog por
+gold_utils.save_to_gold (mesmo padrão de silver_column_docs.py).
 
-Descrições voltadas pro negócio (o que a coluna significa pra quem consome o
-dado - analista, BI, Genie), não pra como ela foi calculada.
+Descrições voltadas para quem consome o dado (analista, BI, Genie).
 """
 
 GOLD_TABLES = {

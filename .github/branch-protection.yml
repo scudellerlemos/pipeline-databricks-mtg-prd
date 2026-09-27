@@ -7,8 +7,7 @@ branch_protection:
         - "validate"
     enforce_admins: false
     required_pull_request_reviews:
-      # 0: projeto solo, sem outro reviewer disponível. Com 1 aqui, toda PR
-      # fica bloqueada e só mergeia via bypass de admin - atrito sem ganho.
+      # 0: projeto solo, sem outro reviewer disponível.
       required_approving_review_count: 0
       dismiss_stale_reviews: true
       require_code_owner_reviews: false

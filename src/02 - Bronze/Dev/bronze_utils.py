@@ -3,21 +3,16 @@
 # BRONZE UTILS - Funções compartilhadas pelos notebooks de Bronze
 # ============================================================================
 """
-Requer infraestrutura comum já carregada no notebook via:
+Importar no notebook com %run ./bronze_utils, DEPOIS de
     %run "../../00 - Common/Dev/base_utils"
-Use %run ./bronze_utils para importar no notebook, DEPOIS do %run acima.
 
-Escopo desta camada (Bronze): EL puro (Extract & Load) da Stage (S3/Parquet)
-para Delta, com metadados técnicos de rastreabilidade. Sem regra de negócio,
-sem renomeação/padronização de colunas (isso é Silver), sem deduplicação por
-chave de negócio (o mesmo id de impressão com preço diferente em runs diferentes é
-histórico legítimo, não duplicata) e sem MERGE/upsert (que colapsaria esse
-histórico) - só APPEND. Preserva o schema de origem 1:1, adicionando apenas
-source_file/bronze_run_id/bronze_ingestion_timestamp por cima.
+Bronze = EL puro da Stage (S3/Parquet) para Delta, só APPEND. Schema de origem
+1:1 + source_file/bronze_run_id/bronze_ingestion_timestamp. Sem regra de
+negócio, renomeação, dedup ou MERGE: o mesmo id com valores diferentes em runs
+diferentes é histórico, não duplicata.
 
-Idempotência: identifica arquivos da Stage já carregados por identidade de
-arquivo (source_file), não por SELECT DISTINCT nos dados de negócio - reprocessa
-só o que a Stage gravou de novo desde a última execução da Bronze.
+Idempotência por arquivo (source_file): só carrega arquivos da Stage que
+ainda não estão na tabela.
 """
 
 import json
@@ -27,11 +22,8 @@ from datetime import datetime, timezone
 from pyspark.errors import AnalysisException
 from pyspark.sql.functions import col, current_timestamp, lit
 
-# get_secret / setup_unity_catalog vêm de base_utils.py, que o notebook
-# chamador deve importar via %run ANTES deste arquivo (ver docstring acima).
-# Não fazemos %run aninhado aqui: o lint estático de notebooks só resolve
-# %run um nível, então um %run dentro deste arquivo vira texto Python
-# inválido quando inlined por ele (mesma razão em silver_utils.py/gold_utils.py).
+# Sem %run aninhado aqui: o lint estático de notebooks só resolve %run de um
+# nível. Por isso o notebook importa base_utils antes deste arquivo.
 
 
 # ============================================================================
@@ -39,18 +31,12 @@ from pyspark.sql.functions import col, current_timestamp, lit
 # ============================================================================
 
 def list_stage_files(dbutils, s3_stage_path, stage_table_name):
-    """Lista os arquivos Parquet da Stage pertencentes a stage_table_name
-    (pasta própria em S3_STAGE_PATH/{stage_table_name}/, ver save_to_parquet
-    em ingestion_utils.py).
+    """Lista os diretórios .parquet em {s3_stage_path}/{stage_table_name}/.
 
-    df.write.save(path) grava `path` como um DIRETÓRIO - dbutils.fs.ls devolve
-    seu nome com "/" no final (ex.: "2026_09_15_cards.parquet/"), daí o
-    rstrip("/") antes do endswith(".parquet").
-
-    Diretório sem part-file dentro é escrita que começou e não commitou (sobra
-    só o marcador _started_* do protocolo de commit). Ignorar aqui, senão ele
-    entra em new_files e spark.read.parquet quebra a Bronze inteira com
-    UNABLE_TO_INFER_SCHEMA por causa de um resto de run antiga.
+    Cada arquivo da Stage é um diretório, e dbutils.fs.ls devolve o nome com
+    "/" no final - daí o rstrip. Diretório sem part-file (só o marcador
+    _started_*) é escrita não commitada e é ignorado; senão read.parquet
+    falha com UNABLE_TO_INFER_SCHEMA.
     """
     table_path = f"{s3_stage_path}/{stage_table_name}"
     all_files = dbutils.fs.ls(table_path)
@@ -65,11 +51,10 @@ def list_stage_files(dbutils, s3_stage_path, stage_table_name):
 
 
 def normalize_path(path):
-    """Remove o esquema de URI e desce ao nível do diretório ".parquet" para
-    comparação de identidade entre list_stage_files (devolve o diretório) e
-    _metadata.file_path (aponta pro part-file dentro dele, ex.:
-    ".../2026_09_15_cards.parquet/part-00000-xxx.snappy.parquet") - sem essa
-    normalização, a comparação de idempotência nunca bateria.
+    """Remove o esquema de URI e corta no diretório ".parquet".
+
+    list_stage_files devolve o diretório; _metadata.file_path aponta pro
+    part-file dentro dele. Normalizados, os dois podem ser comparados.
     """
     path = path.split("://", 1)[-1]
     if ".parquet/" in path:
@@ -78,14 +63,12 @@ def normalize_path(path):
 
 
 def get_already_loaded_files(spark, delta_path):
-    """Arquivos de Stage já carregados nesta tabela Bronze, via source_file.
-    O DISTINCT aqui não é deduplicação de negócio (proibida na Bronze) - é a
-    identificação de arquivo/run exigida para idempotência.
+    """Arquivos de Stage já carregados nesta tabela Bronze (via source_file).
 
-    Só engole AnalysisException (tabela/path ainda não existe - 1a carga);
-    qualquer outro erro sobe, senão a run reingeriria e duplicaria todo o
-    histórico. collect() fica dentro do try porque .load() é lazy em Spark
-    Connect - o PATH_NOT_FOUND só estoura quando essa action roda.
+    Só trata AnalysisException (tabela ainda não existe - 1a carga); qualquer
+    outro erro sobe, senão a run reingeriria todo o histórico. O collect()
+    fica dentro do try porque .load() é lazy em Spark Connect e o
+    PATH_NOT_FOUND só aparece na action.
     """
     try:
         df = spark.read.format("delta").load(delta_path)
@@ -101,11 +84,8 @@ def get_already_loaded_files(spark, delta_path):
 def log_schema_diff(spark, delta_path, incoming_df):
     """Loga colunas novas/ausentes/com tipo diferente vs. a tabela Bronze atual.
 
-    Não bloqueia a escrita: colunas novas são aceitas via mergeSchema (schema
-    evolution aditiva), colunas ausentes neste lote ficam NULL nas linhas novas
-    sem apagar as antigas. Incompatibilidade real de tipo é rejeitada pelo
-    próprio Delta na escrita (AnalysisException) - aqui é só log para
-    diagnóstico, sem duplicar essa validação.
+    Só log, não bloqueia: colunas novas entram via mergeSchema, ausentes ficam
+    NULL nas linhas novas. Tipo incompatível o próprio Delta rejeita na escrita.
     """
     try:
         existing_fields = {f.name: str(f.dataType) for f in spark.read.format("delta").load(delta_path).schema.fields}
@@ -136,10 +116,7 @@ def log_schema_diff(spark, delta_path, incoming_df):
 
 def ensure_unity_catalog_table(spark, full_table_name, delta_path, table_comment=None):
     """Registra a tabela externa Delta no Unity Catalog se ainda não existir.
-
-    Só cria - nunca ALTER/DROP automático aqui. Se a tabela já existe, deixa
-    como está (preserva qualquer modificação manual feita fora do pipe).
-    """
+    Se já existe, não altera nada."""
     if not spark.catalog.tableExists(full_table_name):
         comment = table_comment or "Camada Bronze - dado bruto da Stage, 1:1, sem regra de negócio"
         spark.sql(f"""
@@ -152,21 +129,17 @@ def ensure_unity_catalog_table(spark, full_table_name, delta_path, table_comment
 
 
 def _escape_sql_string(value):
-    # ponytail: testado ao vivo - Spark SQL nao trata '' (dobrar aspas, padrao
-    # ANSI) como aspas literal dentro de um single-quoted string; ele fecha a
-    # string na primeira aspa e abre outra logo em seguida, gerando dois
-    # literais adjacentes = ParseException. Backslash e o que o parser aceita.
+    # Spark SQL não aceita '' (padrão ANSI) como aspa literal - dá
+    # ParseException. O escape que funciona é com backslash.
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
 def apply_table_documentation(spark, full_table_name, table_comment=None, column_comments=None):
     """Aplica COMMENT ON TABLE / ALTER COLUMN...COMMENT no Unity Catalog.
 
-    Metadados apenas (não reescreve dado) - seguro rodar em toda execução,
-    inclusive numa tabela já existente e comentada, pra manter em sincronia
-    com bronze_column_docs.py sem precisar de uma migração separada. Colunas
-    em column_comments que ainda não existem na tabela (schema evolution
-    futura) são silenciosamente ignoradas.
+    Só metadado, então roda em toda execução pra manter a tabela em sincronia
+    com bronze_column_docs.py. Colunas que ainda não existem na tabela são
+    ignoradas.
     """
     if table_comment:
         spark.sql(f"COMMENT ON TABLE {full_table_name} IS '{_escape_sql_string(table_comment)}'")
@@ -194,11 +167,8 @@ def append_to_bronze(df, delta_path, full_table_name, table_comment=None):
 # ============================================================================
 # CONTROLE DE EXECUÇÃO
 # ============================================================================
-# Um JSON por run em {s3_bronze_path}/_control/{bronze_table_name}/{run_id}.json -
-# mesmo padrão da Stage (ver ingestion_utils.py), com os campos pedidos para
-# a Bronze: run_id, tabela, datas, registros lidos/gravados, arquivos
-# processados, registros rejeitados (sempre 0 - Bronze nunca descarta nada),
-# status e erro.
+# Um JSON por run em {s3_bronze_path}/_control/{bronze_table_name}/{run_id}.json,
+# mesmo padrão da Stage. rejected_records é sempre 0: a Bronze não descarta nada.
 
 def start_bronze_run(table_name):
     return {
@@ -222,10 +192,8 @@ def finish_bronze_run(dbutils, run, s3_bronze_path, status, error=None):
     run["status"] = status
     run["error"] = error
 
-    # ponytail: duplicado de ingestion_utils.finish_run em vez de compartilhado
-    # via base_utils.py - um nome definido por um %run não fica visível dentro
-    # de função de outro arquivo também %run (NameError). Mantido
-    # self-contained até achar uma forma de compartilhar que sobreviva a isso.
+    # Duplicado de ingestion_utils.finish_run: função de um arquivo carregado
+    # por %run não enxerga nomes de outro %run (NameError).
     control_dir = f"{s3_bronze_path}/_control/{run['table']}"
     control_path = f"{control_dir}/{run['run_id']}.json"
     try:
@@ -251,17 +219,11 @@ def run_bronze_ingestion(spark, dbutils, catalog_name, schema_name,
                           bronze_table_name, stage_table_name,
                           s3_stage_path, s3_bronze_path,
                           table_comment=None, column_comments=None):
-    """EL completo: identifica arquivos novos da Stage -> lê -> adiciona
-    metadados técnicos -> append na Bronze (schema evolution aditiva) ->
-    garante a tabela no Unity Catalog -> grava o controle de execução.
+    """EL completo: arquivos novos da Stage -> metadados técnicos -> append na
+    Bronze -> tabela no Unity Catalog -> controle de execução.
 
-    Idempotente: se não há arquivo novo da Stage desde a última execução,
-    não escreve nada e a run fecha como SUCCESS com 0 registros.
-
-    table_comment/column_comments (ver bronze_column_docs.py) documentam a
-    tabela no Unity Catalog. Aplicados também no caminho "nada a fazer" pra
-    tabela já existente pegar comentário novo/alterado sem depender de
-    escrever dado novo.
+    Sem arquivo novo, não escreve nada e fecha como SUCCESS com 0 registros.
+    table_comment/column_comments vêm de bronze_column_docs.py.
     """
     run = start_bronze_run(bronze_table_name)
     delta_path = f"{s3_bronze_path}/{bronze_table_name}"
@@ -274,9 +236,7 @@ def run_bronze_ingestion(spark, dbutils, catalog_name, schema_name,
         run["files_processed"] = len(new_files)
 
         if not new_files:
-            # Documenta aqui (só neste caminho) pra tabela já existente pegar
-            # comentário novo/alterado mesmo sem escrever dado novo - evita
-            # repetir a mesma chamada logo abaixo, depois do append.
+            # Atualiza os comentários mesmo sem dado novo.
             if spark.catalog.tableExists(full_table_name):
                 apply_table_documentation(spark, full_table_name, table_comment, column_comments)
             print(f"[{bronze_table_name}] Nenhum arquivo novo da Stage - nada a fazer (idempotente).")
@@ -284,9 +244,8 @@ def run_bronze_ingestion(spark, dbutils, catalog_name, schema_name,
             return None, run
 
         print(f"[{bronze_table_name}] Arquivos novos da Stage: {len(new_files)}")
-        # input_file_name() não é suportado em Unity Catalog com Shared/User
-        # Isolation ([UC_COMMAND_NOT_SUPPORTED.WITH_RECOMMENDATION]) - o
-        # substituto recomendado é a coluna oculta _metadata.file_path.
+        # _metadata.file_path em vez de input_file_name(), que o Unity Catalog
+        # não suporta em Shared/User Isolation.
         df = spark.read.parquet(*new_files) \
             .withColumn("source_file", col("_metadata.file_path")) \
             .withColumn("bronze_run_id", lit(run["run_id"])) \

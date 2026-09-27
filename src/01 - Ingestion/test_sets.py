@@ -1,7 +1,5 @@
-# ponytail: mesma abordagem de test_cards.py - a célula do notebook não é um
-# módulo importável por si só, então carrega o código-fonte da célula
-# "FUNÇÕES ESPECÍFICAS" direto do notebook .py e executa com um `requests`
-# fake (resposta única do Scryfall /sets).
+# O notebook não é importável: carrega o código da célula "FUNÇÕES ESPECÍFICAS"
+# e executa com um `requests` fake (resposta única do Scryfall /sets).
 
 import json
 import os
@@ -70,8 +68,6 @@ def test_fetch_all_sets_maps_fields_in_single_request():
 
 
 def test_fetch_all_sets_no_pagination_needed():
-    # A Scryfall devolve o catálogo inteiro em 1 request só (has_more: false)
-    # - sem loop de paginação necessário.
     sets_data = [{"code": f"s{i}", "name": f"Set {i}", "set_type": "expansion",
                   "released_at": "2020-01-01", "digital": False} for i in range(1049)]
 
@@ -82,9 +78,6 @@ def test_fetch_all_sets_no_pagination_needed():
 
 
 def test_fetch_all_sets_maps_new_scryfall_only_fields():
-    # card_count/parent_set_code/block/icon_svg_uri existem na Scryfall e nao
-    # tinham equivalente na magicthegathering.io - antes ficavam simplesmente
-    # nao capturados (perda silenciosa), agora sao mapeados como os demais.
     sets_data = [{
         "code": "dmc", "name": "Duskmourn Commander", "set_type": "commander",
         "released_at": "2024-09-27", "digital": False,
@@ -103,9 +96,7 @@ def test_fetch_all_sets_maps_new_scryfall_only_fields():
 
 
 def test_magicthegathering_only_fields_become_none_after_clean():
-    # border/mkm_id/mkm_name/gathererCode/magicCardsInfoCode/oldCode/booster
-    # não têm equivalente na Scryfall - clean_sets_data já trata ausência
-    # como None (comportamento existente, não alterado).
+    # Campos legados sem equivalente na Scryfall ficam None.
     to_set_record, _, clean_sets_data = _load_functions(_fake_get_for([]))
     record = to_set_record({"code": "lea", "name": "Alpha", "set_type": "core",
                              "released_at": "1993-08-05", "digital": False})

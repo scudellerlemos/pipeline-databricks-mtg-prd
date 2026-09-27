@@ -1,7 +1,5 @@
-# ponytail: self-check de lógica pura pra _escape_sql_string() (gold_utils.py).
-# Não dá pra importar esse módulo diretamente aqui (precisa de pyspark/delta,
-# indisponível fora de um cluster Databricks), então isto espelha só a lógica de escaping.
-# Idêntica a silver_utils._escape_sql_string (duplicada de propósito, ver docstring de gold_utils.py).
+# Testa a lógica de gold_utils._escape_sql_string. O módulo precisa de
+# pyspark/delta, então a função é espelhada aqui.
 
 
 def escape_sql_string(value):
@@ -10,15 +8,13 @@ def escape_sql_string(value):
 
 
 def test_apostrophe_is_backslash_escaped_not_doubled():
-    # Spark SQL rejeita '' (dobrar aspas, convencao ANSI) dentro de um
-    # single-quoted string literal - so backslash funciona aqui.
+    # Spark SQL nao aceita '' (ANSI) como aspas escapada.
     assert escape_sql_string("carta do jogador") == "carta do jogador"
     assert escape_sql_string("it's a trap") == "it\\'s a trap"
 
 
 def test_literal_backslash_is_escaped_before_the_quote_pass():
-    # backslash precisa ser escapado primeiro, senao o \' virado por um
-    # apostrofo anterior seria re-processado como se fosse um escape novo.
+    # backslash e escapado antes do apostrofo, senao o \' gerado seria reprocessado.
     assert escape_sql_string("a\\b") == "a\\\\b"
     assert escape_sql_string("a\\'b") == "a\\\\\\'b"
 

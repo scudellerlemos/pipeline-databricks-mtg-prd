@@ -54,7 +54,7 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS,
 - **Merge incremental:** por `ID_ESCLARECIMENTO`, desempate por `DT_INGESTAO` mais recente.
 - **Particionamento:** por `ANO_PUBLICACAO` e `MES_PUBLICACAO`.
 - **Tradução de `NME_EMISSOR`:** `'wotc'` -> `'Wizards'`, `'scryfall'` -> `'Scryfall'`, demais valores em Title Case.
-- **Regra "sem `( ) { } no dado Silver"`:** `DESC_ESCLARECIMENTO` converte `{...}`/`(...)` para `[...]`, mesma regra de `TB_FATO_CARTAS`.
+- **Regra "sem `( ) { }` no dado Silver":** `DESC_ESCLARECIMENTO` converte `{...}`/`(...)` para `[...]`, mesma regra de `TB_FATO_CARTAS`.
 
 ## 9. Histórico de Alterações
 | Data | Responsável | Alteração |

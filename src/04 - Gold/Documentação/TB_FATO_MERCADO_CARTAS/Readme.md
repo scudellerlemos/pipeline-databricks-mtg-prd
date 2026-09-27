@@ -9,7 +9,7 @@ Visão única de mercado de cartas de Magic: The Gathering - combina catálogo d
 
 ## 3. Origem dos Dados (Silver)
 - **Usadas (5 de 7):** `TB_FATO_CARTAS` (driver), `TB_FATO_PRECOS_CARTAS` (INNER JOIN por `ID_CARTA`), `TB_DIM_COLECOES` (LEFT JOIN por `COD_COLECAO`), `TB_FATO_ESCLARECIMENTOS_CARTAS` (agregada por `ID_ORACLE`, LEFT JOIN), `TB_MOV_MIGRACOES_CARTAS` (agregada por `ID_CARTA_ANTIGO`, LEFT JOIN em `ID_CARTA = ID_CARTA_ANTIGO` - resolve id de carta migrado/descontinuado pela Scryfall).
-- **Não usadas (2 de 7), desvio documentado:** `TB_DOM_SIMBOLOS` (grão símbolo de mana) e `TB_PONTE_CARTA_SIMBOLOS` (grão carta x símbolo de mana), ambos incompatíveis com o grão carta x cotação desta Gold - juntar exigiria explodir `DESC_CUSTO_MANA` em tokens). Ver docstring de `TB_FATO_MERCADO_CARTAS.py` para o raciocínio completo.
+- **Não usadas (2 de 7):** `TB_DOM_SIMBOLOS` (grão símbolo de mana) e `TB_PONTE_CARTA_SIMBOLOS` (grão carta x símbolo de mana), ambos incompatíveis com o grão carta x cotação desta Gold (juntar exigiria explodir `DESC_CUSTO_MANA` em tokens).
 
 ## 4. Grão e Chave Única
 - **Grão:** 1 linha por cotação de preço de uma impressão de carta.

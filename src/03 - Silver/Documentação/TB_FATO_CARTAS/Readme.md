@@ -9,12 +9,12 @@
 ## 1. Nome da Tabela e Camada
 - **Tabela:** TB_FATO_CARTAS
 - **Camada:** Silver
-- **Classificação DAMA-DMBOK (#116):** Fato - uma linha por impressão de carta (grão), com medidas quantitativas (QTD_CUSTO_MANA, QTD_CORES) e chave estrangeira implícita para a dimensão de coleção (COD_COLECAO -> TB_DIM_COLECOES). Preço e histórico de migração de id são Fatos/movimento à parte (TB_FATO_PRECOS_CARTAS, TB_MOV_MIGRACOES_CARTAS - ver observação abaixo).
+- **Classificação DAMA-DMBOK:** Fato - uma linha por impressão de carta (grão), com medidas quantitativas (QTD_CUSTO_MANA, QTD_CORES) e chave estrangeira implícita para a dimensão de coleção (COD_COLECAO -> TB_DIM_COLECOES). Preço e histórico de migração de id são Fatos/movimento à parte (TB_FATO_PRECOS_CARTAS, TB_MOV_MIGRACOES_CARTAS - ver observação abaixo).
 
 ## 2. Descrição Completa
 Tabela Silver contendo os dados limpos e transformados de cartas do Magic: The Gathering, processados a partir da camada Bronze com aplicação de regras de negócio, limpeza de dados e padronização para análises de gameplay, deckbuilding e coleção. Responde "o que é essa carta" - texto de regras, custo de mana, tipo, raridade, artista e em qual coleção ela saiu.
 
-**Separação de preço e migração:** até a revisão de 2026-09-15 (#115/#116), esta tabela também carregava o histórico diário de preço (`VLR_USD`/`VLR_EUR`/`VLR_TIX`) e o id canônico pós-migração da Scryfall (`ID_SCRYFALL_CANONICO`), unificados via `attach_prices`/`attach_canonical_id`. Essas duas fontes têm grão diferente do de cartas (preço é por impressão com data de coleta; migração é um evento de mudança de id, não um atributo de carta) e foram separadas em tabelas próprias - ver `TB_FATO_PRECOS_CARTAS` e `TB_MOV_MIGRACOES_CARTAS`. Preço junta por `ID_CARTA`; migração junta `ID_CARTA = ID_CARTA_ANTIGO` e usa `ID_CARTA_CANONICO`.
+**Preço e migração ficam fora desta tabela:** têm grão diferente do de cartas (preço é por impressão com data de coleta; migração é um evento de mudança de id, não um atributo de carta) e vivem em tabelas próprias - ver `TB_FATO_PRECOS_CARTAS` e `TB_MOV_MIGRACOES_CARTAS`. Preço junta por `ID_CARTA`; migração junta `ID_CARTA = ID_CARTA_ANTIGO` e usa `ID_CARTA_CANONICO`.
 
 ## 3. Origem dos Dados
 - **Fonte (Bronze):** `cards`
@@ -93,5 +93,5 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS 
 ## 10. Observações
 - Pipeline exibe logs detalhados de transformações aplicadas.
 - Merge incremental idempotente por `ID_CARTA`.
-- Preço de mercado agora está em `TB_FATO_PRECOS_CARTAS` (junte por `ID_CARTA`).
+- Preço de mercado está em `TB_FATO_PRECOS_CARTAS` (junte por `ID_CARTA`).
 - Consumidores Gold que agrupam/janelam por carta através de uma migração de id devem usar `TB_MOV_MIGRACOES_CARTAS.ID_CARTA_CANONICO`, não `ID_CARTA`.

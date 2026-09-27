@@ -33,16 +33,12 @@ SCRYFALL_API_URL = get_secret("scryfall_api_url")
 # Scryfall rejeita o User-Agent default do requests (erro "generic_user_agent")
 SCRYFALL_HEADERS = {"User-Agent": "MTGPipeline/1.0"}
 MAX_RETRIES = int(get_secret("max_retries", "3"))
-# default_cards = 1 objeto por IMPRESSÃO, cada um com seu próprio `prices` -
-# o mesmo bulk que cards.py usa. O preço de Magic varia por impressão (um
-# Lightning Bolt de 1993 e a reimpressão de 2026 não valem o mesmo), então
-# oracle_cards (1 objeto por Oracle ID, deduplicado entre impressões) devolvia
-# o preço de uma impressão arbitrária como se fosse o preço "da carta".
+# default_cards = 1 objeto por impressão, cada um com seu `prices` (o preço
+# varia por impressão). Mesmo bulk de cards.py.
 SCRYFALL_BULK_TYPE = "default_cards"
 
-# Janela temporal: mesma fonte que cards/sets (secret years_back). card_prices
-# grava seu próprio snapshot independente e filtra pelo released_at da própria
-# impressão (cards filtra pelos sets da janela), sem depender da execução deles.
+# Janela temporal (years_back): filtra pelo released_at da própria impressão,
+# sem depender da execução de cards/sets.
 YEARS_BACK = int(get_secret("years_back", "5"))
 current_year = datetime.now().year
 cutoff_year = current_year - YEARS_BACK
@@ -56,16 +52,13 @@ print(f"YEARS_BACK: {YEARS_BACK} | CUTOFF_DATE_STR: {CUTOFF_DATE_STR}")
 # FUNÇÕES ESPECÍFICAS DE CARD_PRICES
 # =============================================================================
 CARD_PRICES_SCHEMA = StructType([
-    # id = id da impressão (mesmo `id` de cards.py) - chave de join com
-    # TB_FATO_CARTAS.ID_CARTA da Silver em diante.
+    # id da impressão (mesmo `id` de cards.py). Vira ID_CARTA na Silver, chave
+    # do join com TB_FATO_CARTAS feito na Gold.
     StructField("id", StringType(), True),
     StructField("name", StringType(), True),
     StructField("set", StringType(), True),
     StructField("rarity", StringType(), True),
-    # A Scryfall cota cada variante fisica da mesma impressao separadamente -
-    # foil chega a valer varios multiplos do nao-foil (ex.: Lightning Bolt em
-    # msc, usd 0.74 vs usd_foil 3.73). Capturar so `usd` exibiria o preco de
-    # uma variante como se fosse o da impressao inteira.
+    # Um preco por variante (normal/foil/etched) da mesma impressao.
     StructField("usd", StringType(), True),
     StructField("usd_foil", StringType(), True),
     StructField("usd_etched", StringType(), True),
@@ -79,12 +72,9 @@ CARD_PRICES_SCHEMA = StructType([
 
 
 def _to_price_record(card):
-    # Landing zone captura o catálogo de preços como a Scryfall devolve, sem
-    # tentar casar com os arquivos de `cards` já gravados no S3 - esse join
-    # (1:1 por id da impressão) fica pra Gold, não pra Stage.
+    # Grava como a Scryfall devolve; o join com `cards` (por id) fica na Gold.
     prices = card.get("prices", {}) or {}
-    # Dupla face (DFC) não tem image_uris na raiz - só em card_faces[0]
-    # (frente), mesmo fallback de cards.py.
+    # Dupla face (DFC) não tem image_uris na raiz - usa card_faces[0] (frente).
     faces = card.get("card_faces") or [{}]
     image_uris = card.get("image_uris") or faces[0].get("image_uris")
     return {
@@ -105,8 +95,7 @@ def _to_price_record(card):
 
 
 def fetch_price_records():
-    # Mesmo padrão de cards.py: 1 request pro índice do Bulk Data +
-    # 1 pro catálogo inteiro, sem requisição por carta.
+    # 1 request pro índice do Bulk Data + 1 pro catálogo inteiro.
     resp = http_get_with_retry(f"{SCRYFALL_API_URL}/bulk-data", headers=SCRYFALL_HEADERS, retries=MAX_RETRIES)
     entry = next(e for e in resp.json()["data"] if e["type"] == SCRYFALL_BULK_TYPE)
 
@@ -168,8 +157,7 @@ if not setup_success:
 
 print("Setup concluído com sucesso")
 
-# Controle de execução (run_id, status, contagens) via run_stage_ingestion -
-# padroniza o wrapper start_run -> try/ingest -> finish_run - ver ingestion_utils.py
+# Executa com controle de execução (ver run_stage_ingestion em ingestion_utils.py)
 prices_df, run = run_stage_ingestion(
     "card_prices", "bulk-data/default_cards",
     lambda run: ingest_card_prices(table_name="card_prices", run=run),
@@ -183,10 +171,10 @@ print("RELATÓRIO DE INGESTÃO DE PREÇOS")
 print("=" * 50)
 
 if prices_df is not None:
-    print("✅ Arquivos salvos com sucesso")
-    print(f"📊 Total de registros: {prices_df.count()}")
-    print(f"🎯 Particionamento: por releaseDate (janela de {YEARS_BACK} anos)")
+    print("Arquivos salvos com sucesso")
+    print(f"Total de registros: {prices_df.count()}")
+    print(f"Particionamento: por releaseDate (janela de {YEARS_BACK} anos)")
 else:
-    print("❌ Falha na ingestão de preços")
+    print("Falha na ingestão de preços")
 
 print("=" * 50)

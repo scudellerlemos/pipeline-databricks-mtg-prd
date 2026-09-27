@@ -30,15 +30,11 @@ S3_BASE_PATH = f"s3://{S3_BUCKET}/{S3_STAGE_PREFIX}"
 SCRYFALL_API_URL = get_secret("scryfall_api_url")
 SCRYFALL_HEADERS = {"User-Agent": "MTGPipeline/1.0"}
 MAX_RETRIES = int(get_secret("max_retries", "3"))
-# rulings = 1 objeto por ruling, referenciando a carta via oracle_id (não por
-# impressão) - mesmo padrão de bulk-data usado por cards.py/card_prices.py.
+# rulings = 1 objeto por ruling, ligado à carta por oracle_id (não por impressão).
 SCRYFALL_BULK_TYPE = "rulings"
 
-# Sem filtro years_back aqui: diferente de cards/sets/card_prices (onde a
-# janela limita o catálogo a impressões/preços recentes), uma ruling antiga
-# sobre uma carta antiga continua válida e relevante hoje - não "expira" pelo
-# calendário. O catálogo inteiro é pequeno (~79k linhas, ~5MB comprimido), sem
-# necessidade de recorte.
+# Sem filtro years_back: ruling antiga continua válida, e o catálogo é pequeno
+# (~79k linhas, ~5MB comprimido).
 print("Sem filtro temporal - captura o catálogo de rulings inteiro")
 
 # COMMAND ----------
@@ -55,9 +51,8 @@ RULINGS_SCHEMA = StructType([
 
 
 def _to_ruling_record(ruling):
-    # Landing zone captura a ruling como a Scryfall devolve, referenciada por
-    # oracle_id - o join com as impressões de cards.py (1 oracle_id -> N
-    # impressões) fica pra Gold, não pra Stage.
+    # Grava como a Scryfall devolve; o join com cards (1 oracle_id -> N
+    # impressões) fica na Gold.
     return {
         "oracle_id": ruling.get("oracle_id"),
         "source": ruling.get("source"),
@@ -67,8 +62,7 @@ def _to_ruling_record(ruling):
 
 
 def fetch_ruling_records():
-    # Mesmo padrão de card_prices.py: 1 request pro índice do Bulk Data +
-    # 1 pro catálogo inteiro, sem requisição por carta/ruling.
+    # 1 request pro índice do Bulk Data + 1 pro catálogo inteiro.
     resp = http_get_with_retry(f"{SCRYFALL_API_URL}/bulk-data", headers=SCRYFALL_HEADERS, retries=MAX_RETRIES)
     entry = next(e for e in resp.json()["data"] if e["type"] == SCRYFALL_BULK_TYPE)
 
@@ -115,8 +109,7 @@ if not setup_success:
 
 print("Setup concluído com sucesso")
 
-# Controle de execução (run_id, status, contagens) via run_stage_ingestion -
-# padroniza o wrapper start_run -> try/ingest -> finish_run - ver ingestion_utils.py
+# Executa com controle de execução (ver run_stage_ingestion em ingestion_utils.py)
 rulings_df, run = run_stage_ingestion(
     "rulings", "bulk-data/rulings",
     lambda run: ingest_rulings(table_name="rulings", run=run),

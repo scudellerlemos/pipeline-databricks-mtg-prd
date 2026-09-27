@@ -60,7 +60,7 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS,
 - **Filtro temporal:** não aplicado. A Bronze acumula um snapshot do catálogo por execução e a Silver lê todos; o dedup por `COD_SIMBOLO` fica com a versão de `DT_INGESTAO` mais recente (`order_by_col`).
 - **Merge incremental:** por `COD_SIMBOLO`.
 - **Particionamento:** nenhum (tabela pequena e estática - algumas dezenas de linhas).
-- **Regra "sem `( ) { } no dado Silver"` - aplicada sem exceção a `COD_SIMBOLO`:** a notação nativa de símbolo da Scryfall usa chave (`{W}`), que é notação legítima do domínio, não um artefato de serialização. Mesmo assim, esta tabela converte para colchete (`[W]`) pela mesma regra usada em `TB_FATO_CARTAS`, garantindo que o mesmo símbolo tenha a mesma notação em toda a Silver e permita junção direta entre um token de `DESC_CUSTO_MANA` e `COD_SIMBOLO`.
+- **Regra "sem `( ) { }` no dado Silver" - aplicada sem exceção a `COD_SIMBOLO`:** a notação nativa de símbolo da Scryfall usa chave (`{W}`), que é notação legítima do domínio, não um artefato de serialização. Mesmo assim, esta tabela converte para colchete (`[W]`) pela mesma regra usada em `TB_FATO_CARTAS`, garantindo que o mesmo símbolo tenha a mesma notação em toda a Silver e permita junção direta entre um token de `DESC_CUSTO_MANA` e `COD_SIMBOLO`.
 
 ## 9. Histórico de Alterações
 | Data | Responsável | Alteração |

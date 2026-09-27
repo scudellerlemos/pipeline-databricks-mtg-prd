@@ -1,16 +1,9 @@
 #!/usr/bin/env python3
-"""Roda o smoke_test no ambiente recem-deployado e espera o resultado.
+"""Roda o notebook smoke_deploy no ambiente recem-deployado e espera o resultado.
 
-Fecha o unico buraco que nem o CI nem o verify_deployment alcancam: os dois
-sao estaticos. O CI le YAML e roda pytest de funcao pura; o verify_deployment
-rele as settings do job pela API. Nenhum dos dois sobe um cluster, entao nada
-prova que o ambiente funciona ate a run mensal - que em producao nunca
-aconteceu.
-
-Nao cria job: usa `jobs submit`, que e um run avulso e some sozinho. O cluster
-e o git_source saem do gold.yml ja passado pelo apply_target, entao o smoke
-roda com exatamente a mesma config (tag, spark_env_vars, pool) do deploy que
-acabou de acontecer - nao com uma copia que pode divergir.
+Unica verificacao que sobe cluster: CI e verify_deployment sao estaticos.
+Usa `jobs submit` (run avulso, nao cria job). Cluster e git_source vem do
+gold.yml ja passado pelo apply_target, com a mesma config do deploy.
 """
 
 import json
@@ -62,7 +55,7 @@ def esperar(run_id):
             resultado = estado.get("result_state")
             detalhe = estado.get("state_message") or ""
             return resultado == "SUCCESS", f"{ciclo}/{resultado} {detalhe}".strip()
-        deploy.log(f"⏳ smoke {ciclo}...")
+        deploy.log(f"smoke {ciclo}...")
         time.sleep(INTERVALO_S)
     return False, "o poll estourou o tempo"
 
@@ -72,7 +65,7 @@ def main():
     if not ok:
         return 1
     if not is_new_cli:
-        deploy.log("❌ smoke.py precisa da CLI nova (databricks/setup-cli)", "ERROR")
+        deploy.log("smoke.py precisa da CLI nova (databricks/setup-cli)", "ERROR")
         return 1
 
     payload = montar_payload()
@@ -80,21 +73,21 @@ def main():
         json.dump(payload, f, indent=2, ensure_ascii=False)
 
     try:
-        deploy.log(f"💨 Submetendo {payload['run_name']} ({payload['git_source'].get('git_tag') or payload['git_source'].get('git_branch')})...")
+        deploy.log(f"Submetendo {payload['run_name']} ({payload['git_source'].get('git_tag') or payload['git_source'].get('git_branch')})...")
         run_id = cli("jobs", "submit", "--json", f"@{JSON_TMP}", "--no-wait", "-o", "json").get("run_id")
         if not run_id:
-            deploy.log("❌ jobs submit nao devolveu run_id", "ERROR")
+            deploy.log("jobs submit nao devolveu run_id", "ERROR")
             return 1
-        deploy.log(f"🔗 run {run_id}")
+        deploy.log(f"run {run_id}")
 
         sucesso, estado = esperar(run_id)
         if sucesso:
-            deploy.log(f"✅ Smoke passou · run {run_id}")
+            deploy.log(f"Smoke passou · run {run_id}")
             return 0
-        deploy.log(f"❌ Smoke falhou · run {run_id} · {estado}", "ERROR")
+        deploy.log(f"Smoke falhou · run {run_id} · {estado}", "ERROR")
         return 1
     except subprocess.CalledProcessError as e:
-        deploy.log(f"❌ Erro na CLI: {e.stderr}", "ERROR")
+        deploy.log(f"Erro na CLI: {e.stderr}", "ERROR")
         return 1
     finally:
         if os.path.exists(JSON_TMP):

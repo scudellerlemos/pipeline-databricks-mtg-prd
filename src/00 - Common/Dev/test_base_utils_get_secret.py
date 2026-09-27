@@ -1,7 +1,5 @@
-# ponytail: exercita o get_secret() real de base_utils.py. dbutils não existe
-# fora de um cluster Databricks, então a chamada dentro do try de get_secret
-# levanta NameError - capturado pelo except genérico, exatamente o caminho de
-# fallback que este teste quer cobrir.
+# Testa o get_secret() real de base_utils.py. Fora do Databricks dbutils não
+# existe, então a leitura do secret levanta NameError e cai no caminho de fallback.
 
 import importlib.util
 import os
@@ -18,8 +16,7 @@ def test_explicit_default_wins():
 
 
 def test_s3_bucket_from_env_drops_scheme():
-    # Stage/Bronze prefixam "s3://" sozinhos: com o esquema no valor, o
-    # caminho vira "s3://s3://..." e o S3 responde 400.
+    # Stage/Bronze prefixam "s3://"; com o esquema no valor o caminho viraria "s3://s3://...".
     os.environ["MTG_S3_BUCKET"] = "s3://magicthegatheringdev/prd"
     try:
         assert base_utils.get_secret("s3_bucket") == "magicthegatheringdev/prd"
@@ -47,8 +44,7 @@ def test_raises_when_no_default_available():
 
 
 def test_s3_bucket_has_no_silent_fallback():
-    # s3_bucket é o destino real de leitura/escrita de todas as camadas - não
-    # pode cair silenciosamente num bucket placeholder quando o secret falha.
+    # s3_bucket não tem default: falha em vez de usar um bucket placeholder.
     try:
         base_utils.get_secret("s3_bucket")
     except Exception as e:
@@ -58,9 +54,7 @@ def test_s3_bucket_has_no_silent_fallback():
 
 
 def test_env_var_vence_o_secret_e_o_default():
-    # Precedencia env var > secret > default: e assim que prd sobrescreve so o
-    # que difere, em vez de duplicar o scope inteiro. Nenhuma dessas chaves e
-    # segredo - sao config (bucket, prefixo, URL publica).
+    # Precedencia env var > secret > default: prd sobrescreve so o que difere.
     os.environ["MTG_CATALOG_NAME"] = "mtg_prod"
     try:
         assert base_utils.get_secret("catalog_name") == "mtg_prod"
@@ -69,9 +63,7 @@ def test_env_var_vence_o_secret_e_o_default():
 
 
 def test_producao_sem_catalogo_injetado_explode():
-    # O desastre que isso trava: dev e prd dividem o mesmo workspace, entao
-    # esquecer de injetar MTG_CATALOG_NAME faria o job de producao gravar por
-    # cima das tabelas de mtg_dev - task verde, dado destruido.
+    # Sem MTG_CATALOG_NAME, producao resolveria mtg_dev (mesmo workspace) e gravaria nas tabelas de dev.
     os.environ["MTG_ENVIRONMENT"] = "production"
     try:
         base_utils.get_secret("catalog_name")

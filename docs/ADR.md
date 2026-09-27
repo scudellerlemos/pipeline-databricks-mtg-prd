@@ -1,4 +1,4 @@
-# 📐 Decisões de Arquitetura (ADR)
+# Decisões de Arquitetura (ADR)
 
 Registro das decisões que moldam o projeto: o que foi decidido, por quê, e o que
 se aceitou em troca. Decisão nova entra no fim com o próximo número; decisão
@@ -223,8 +223,8 @@ processar dado, e um bug só aparecia na próxima 1ª segunda-feira.
 
 **Decisão.** Depois do deploy e do smoke test, o `deploy-prd.yml` dispara o
 `MTG_PIPELINE_PRD` (`run-now --no-wait`) quando o snapshot da publicação mudou
-algum arquivo (código ou não). Publicação vazia (nada mudou no snapshot) só redeploya. Rollback manual
-roda só com o input `rodar` marcado.
+algum arquivo que não é documentação (`*.md` e `docs/`). Publicação vazia ou só
+de documentação só redeploya. Rollback manual roda só com o input `rodar` marcado.
 
 **Consequências.** Código novo é exercitado na hora, com dado real. Rodar a
 mais é seguro pela [ADR-003](#adr-003--bronze-append-only-silver-e-gold-com-merge).

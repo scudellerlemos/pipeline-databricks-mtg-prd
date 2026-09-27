@@ -24,10 +24,8 @@ from pyspark.sql.types import *
 # CONFIGURAÇÕES GLOBAIS
 # =============================================================================
 
-# GET /symbology devolve o catálogo inteiro de símbolos (mana, tap, etc.) em 1
-# request só (has_more=false), mesmo padrão de sets.py. É um catálogo de
-# referência - a Scryfall não expõe data de alteração por símbolo, então não
-# há filtro temporal (years_back/cutoff): idempotência é só por arquivo do dia.
+# Catálogo de símbolos (mana, tap, etc.) sem data de alteração, então sem
+# filtro temporal: 1 arquivo por dia.
 SCRYFALL_API_URL = get_secret("scryfall_api_url")
 SCRYFALL_HEADERS = {"User-Agent": "MTGPipeline/1.0"}
 MAX_RETRIES = int(get_secret("max_retries", "3"))
@@ -83,17 +81,13 @@ def _to_symbol_record(s):
         "phyrexian": s.get("phyrexian"),
         "cmc": as_float(s.get("cmc")),
         "funny": s.get("funny"),
-        # colors/gatherer_alternates são listas (ou null) na Scryfall -
-        # serializa como JSON pra caber
-        # numa coluna StringType sem perder a estrutura original.
+        # Listas viram JSON (coluna StringType); null continua None.
         "colors": json.dumps(s.get("colors")) if s.get("colors") is not None else None,
         "gatherer_alternates": json.dumps(s.get("gatherer_alternates")) if s.get("gatherer_alternates") is not None else None,
     }
 
 def fetch_all_symbols():
-    # GET /symbology documenta has_more=false (catálogo inteiro em 1 request),
-    # mas segue next_page defensivamente - mesmo padrão de fetch_all_migrations()
-    # em migrations.py, caso a Scryfall passe a paginar esse endpoint.
+    # /symbology devolve tudo em 1 request hoje; segue next_page caso passe a paginar.
     records = []
     url = f"{SCRYFALL_API_URL}/symbology"
     while url:
@@ -132,8 +126,7 @@ print("Setup concluído com sucesso")
 
 # Iniciar ingestão de symbology
 
-# Controle de execução (run_id, status, contagens) via run_stage_ingestion -
-# padroniza o wrapper start_run -> try/ingest -> finish_run - ver ingestion_utils.py
+# Executa com controle de execução (ver run_stage_ingestion em ingestion_utils.py)
 symbology_df, run = run_stage_ingestion("symbology", "symbology", ingest_symbology, S3_BASE_PATH)
 
 # Gerar relatório

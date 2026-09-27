@@ -1,7 +1,5 @@
-# ponytail: mesma abordagem de test_sets.py - a célula "FUNÇÕES ESPECÍFICAS"
-# do notebook não é um módulo importável por si só, então carrega seu
-# código-fonte direto do notebook .py e executa com um `requests` fake
-# (resposta única do Scryfall /symbology).
+# O notebook não é importável: carrega o código da célula "FUNÇÕES ESPECÍFICAS"
+# e executa com um `requests` fake (resposta única do Scryfall /symbology).
 
 import json
 import os
@@ -16,8 +14,7 @@ def _load_functions(fake_get):
 
     ns = {
         "json": json,
-        # vem do %run ./ingestion_utils no notebook - comportamento real
-        # coberto por test_ingestion_utils.test_as_float_converte_int_e_preserva_none
+        # no notebook vem do %run ./ingestion_utils
         "as_float": lambda v: float(v) if v is not None else None,
         "http_get_with_retry": lambda url, headers=None, timeout=30, retries=3: fake_get(url, headers=headers, timeout=timeout),
         "StructType": lambda fields: None,
@@ -70,9 +67,7 @@ def test_fetch_all_symbols_maps_fields_in_single_request():
     assert records[0]["gatherer_alternates"] == json.dumps(["ocT", "oT"])
 
 def test_null_list_fields_stay_none():
-    # gatherer_alternates vem null pra muitos símbolos (não tem alternativa no
-    # Gatherer) - json.dumps(None) viraria a string "null", então o mapeamento
-    # preserva None de verdade em vez de serializar o null.
+    # null tem que continuar None, não virar a string "null" do json.dumps.
     symbols_data = [
         {"symbol": "{CHAOS}", "svg_uri": "https://svgs.scryfall.io/card-symbols/CHAOS.svg",
          "loose_variant": None, "english": "chaos", "transposable": False,
@@ -88,8 +83,6 @@ def test_null_list_fields_stay_none():
     assert record["colors"] == "[]"
 
 def test_fetch_all_symbols_no_pagination_needed():
-    # mesmo padrão de sets.py: /symbology devolve o catálogo inteiro em 1
-    # request só (has_more: false) - sem loop de paginação necessário.
     symbols_data = [{"symbol": f"{{S{i}}}", "svg_uri": f"https://x/{i}.svg",
                       "loose_variant": None, "english": f"symbol {i}", "transposable": False,
                       "represents_mana": False, "appears_in_mana_costs": False, "mana_value": 0.0,

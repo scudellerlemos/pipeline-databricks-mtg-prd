@@ -40,8 +40,7 @@ resources:
             source: GIT
           job_cluster_key: Job_cluster
 
-        # Ponte carta x simbolo de mana - Silver->Silver, le TB_FATO_CARTAS
-        # (custo de mana ja limpo) e TB_DOM_SIMBOLOS (catalogo de simbolos).
+        # Ponte carta x simbolo de mana: le TB_FATO_CARTAS e TB_DOM_SIMBOLOS (Silver).
         - task_key: silver_ponte_simbolos
           depends_on:
             - task_key: silver_cartas
@@ -55,10 +54,8 @@ resources:
         - job_cluster_key: Job_cluster
           new_cluster:
             spark_version: "15.4.x-scala2.12"
-            # Instance pool mtg-pipeline-pool-dbr154: o runtime 15.4 ja vem
-            # pre-carregado (preloaded_spark_versions), o cluster nao instala o
-            # Spark ao subir. min_idle_instances=0: fora da janela de 10 min de
-            # idle a instancia on-demand ainda e provisionada na hora.
+            # Pool mtg-pipeline-pool-dbr154: runtime 15.4 pre-carregado. Com
+            # min_idle_instances=0, fora dos 10 min de idle a instancia e provisionada na hora.
             instance_pool_id: "0925-163505-peep89-pool-mgfqrcwi"
             driver_instance_pool_id: "0925-163505-peep89-pool-mgfqrcwi"
             autoscale:

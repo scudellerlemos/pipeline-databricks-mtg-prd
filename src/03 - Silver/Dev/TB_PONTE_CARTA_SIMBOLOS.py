@@ -3,37 +3,17 @@
 # CAMADA SILVER - PONTE CARTA X SIMBOLOS DE CUSTO - MAGIC: THE GATHERING
 # =============================================================================
 """
-Script Python para construção da tabela TB_PONTE_CARTA_SIMBOLOS.
-Silver -> Silver (não Bronze -> Silver): explode o custo de mana já limpo de
-TB_FATO_CARTAS em uma linha por símbolo, resolvendo a relação N:N entre carta
-e símbolo de mana que hoje só existe escondida dentro do texto de
-DESC_CUSTO_MANA (ex.: "[2][U][U]" -> 3 linhas).
+TB_PONTE_CARTA_SIMBOLOS: carta x símbolo de custo de mana, Silver -> Silver.
 
-CLASSIFICAÇÃO DAMA-DMBOK: Ponte/associativa (bridge table) - não é Fato (não
-tem grão de evento, não "aconteceu" em uma data; é a decomposição de um
-atributo estático já existente em TB_FATO_CARTAS) nem Dimensão nem DOM/REF
-(quem define o que cada símbolo significa é TB_DOM_SIMBOLOS. Esta tabela só
-resolve QUAL carta tem QUAL símbolo). Daí o prefixo TB_PONTE_.
+Tabela ponte (N:N): explode DESC_CUSTO_MANA de TB_FATO_CARTAS em uma linha
+por símbolo (ex.: "[2][U][U]" -> 3 linhas). Lê da Silver porque só lá o custo
+já está em notação de colchete; por isso não tem colunas de linhagem Bronze.
 
-FONTE: lê TB_FATO_CARTAS da própria Silver (não da Bronze) - só lá
-DESC_CUSTO_MANA já está limpo e convertido pra notação de colchete
-([X] em vez de {X}, ver regra "sem ( ) { } no dado Silver" na docstring de
-TB_FATO_CARTAS.py). Por isso não tem colunas de linhagem Bronze
-(DT_INGESTAO/NME_FONTE/etc. de COMMON_COLUMNS) - esta tabela não é
-extraída direto da Bronze, é derivada de outra Silver.
+Chave única: (ID_CARTA, NUM_ORDEM_SIMBOLO), posição 1-based gerada por
+posexplode. Sem particionamento: não há data de evento própria.
 
-CHAVE ÚNICA: (ID_CARTA, NUM_ORDEM_SIMBOLO) - NUM_ORDEM_SIMBOLO é a posição do
-símbolo dentro do custo de mana (1-based), sempre gerada por posexplode,
-nunca nula por natureza.
-
-SEM partition_cols: esta tabela não tem data de evento própria (é derivada de
-um atributo estático de TB_FATO_CARTAS) - inventar ANO_X/MES_X sem uma data
-real de origem seria particionamento artificial.
-
-COD_SIMBOLO NÃO É MASCARADO: é a FK pra TB_DOM_SIMBOLOS.COD_SIMBOLO. Símbolo
-sem match no domínio ainda vira uma linha aqui (o token existe no custo de
-mana, é fato) - só não tem descrição/cor decodificada em TB_DOM_SIMBOLOS.
-Contagem de símbolo sem match é logada (DQ informativo), nunca falha a run.
+COD_SIMBOLO é FK para TB_DOM_SIMBOLOS. Símbolo sem match no domínio ainda
+gera linha; a contagem é só logada (DQ informativo, não falha a run).
 """
 
 # =============================================================================
@@ -92,16 +72,12 @@ def transform_ponte_carta_simbolos(df_cartas, df_simbolos):
         WHERE c.DESC_CUSTO_MANA IS NOT NULL AND c.DESC_CUSTO_MANA != 'NA'
     """)
 
-    # DQ informativo: símbolo extraído do custo de mana sem match no domínio
-    # (não bloqueia a run - só sinaliza símbolo novo/não catalogado).
-    # ponytail: reusa df_final (ja explodido) em vez de repetir o posexplode.
-    # LATERAL VIEW nao aceita JOIN depois dele na mesma clausula FROM, e o ON
-    # precisaria da coluna que o proprio explode gera - por isso a versao SQL
-    # quebrava com PARSE_SYNTAX_ERROR antes de rodar o DQ.
+    # DQ informativo: símbolos sem match em TB_DOM_SIMBOLOS.
+    # Feito em DataFrame: LATERAL VIEW não aceita JOIN na mesma cláusula FROM.
     qtd_simbolo_nao_catalogado = df_final.join(
         df_simbolos, on="COD_SIMBOLO", how="left_anti"
     ).count()
-    nivel = "⚠️" if qtd_simbolo_nao_catalogado > 0 else "✅"
+    nivel = "AVISO" if qtd_simbolo_nao_catalogado > 0 else "OK"
     print(f"{nivel} DQ simbolos_sem_match_em_TB_DOM_SIMBOLOS: {qtd_simbolo_nao_catalogado}")
 
     logger.info(f"Transformação Ponte Carta x Símbolos concluída: {df_final.count()} registros")
@@ -121,8 +97,7 @@ setup_unity_catalog(config['catalog_name'], config['schema_silver'])
 # =============================================================================
 processor = SilverTableProcessor("TB_PONTE_CARTA_SIMBOLOS", config)
 
-# Silver -> Silver: lê direto via spark.table (não extract_from_bronze - esta
-# tabela não tem fonte na Bronze, é derivada de outra Silver).
+# Fonte é a própria Silver, então lê via spark.table e não extract_from_bronze.
 df_cartas = spark.table(f"{config['catalog_name']}.{config['schema_silver']}.TB_FATO_CARTAS")
 df_simbolos = spark.table(f"{config['catalog_name']}.{config['schema_silver']}.TB_DOM_SIMBOLOS")
 

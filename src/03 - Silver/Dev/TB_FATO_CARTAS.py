@@ -3,49 +3,27 @@
 # CAMADA SILVER - CARTAS - MAGIC: THE GATHERING
 # =============================================================================
 """
-Script Python para processamento da tabela TB_FATO_CARTAS.
-Transformação e limpeza de dados da Bronze para Silver.
+TB_FATO_CARTAS: cartas de Magic, Bronze `cards` -> Silver.
 
-CLASSIFICAÇÃO DAMA-DMBOK: Fato - uma linha por impressão de carta (grão), com
-medidas quantitativas (QTD_CUSTO_MANA, QTD_CORES) e chaves estrangeiras
-implícitas pra dimensões (COD_COLECAO -> TB_DIM_COLECOES). Daí o prefixo
-TB_FATO_ e o nome sem o segmento redundante "SILVER" (já implícito no schema
-silver.* do Unity Catalog).
+Fato: uma linha por impressão de carta, com medidas (QTD_CUSTO_MANA,
+QTD_CORES) e COD_COLECAO -> TB_DIM_COLECOES.
+Chave única: ID_CARTA, declarada como PRIMARY KEY.
 
-CHAVE ÚNICA: ID_CARTA (ver save_silver_table no fim do notebook) - NOT NULL
-por natureza, então a constraint PRIMARY KEY no Unity Catalog é aplicada com
-sucesso (além do COMMENT ON TABLE sempre gravado).
+Nomes de coluna em MAIÚSCULO com prefixo semântico (ID_/NME_/DESC_/COD_/DT_/
+QTD_/NUM_/URL_). Colunas de nome/categoria passam por normalizar_valor()
+(Title_Case, sem acento, "_" no lugar de espaço); ID_/COD_/URL_ e texto livre
+longo ficam como vêm.
 
-CONVENÇÃO DE NOME/CASE DE COLUNA: nome de coluna 100% MAIÚSCULO (prefixo
-semântico ID_/NME_/DESC_/COD_/DT_/QTD_/NUM_/URL_ + resto do nome, ex.:
-NME_CARTA). Valor de atributo (colunas de nome/categoria) em Title_Case por
-palavra, sem acento, espaço virando "_" (ex.: "mana vermelha" ->
-"Mana_Vermelha") - ver normalizar_valor() em silver_utils.py. Exceção:
-ID_/COD_/URL_* e texto livre longo mantêm sua própria convenção de case.
-Bronze/Ingestion continuam passthrough 1:1 da fonte.
+A transformação é uma única spark.sql() com CTEs:
+_renomeado -> _limpo -> _sem_delimitador -> SELECT final (que precisa ler
+COD_CORES/DESC_CUSTO_MANA já limpos).
 
-TRANSFORMAÇÃO DE NEGÓCIO EM SQL: toda a lógica de limpeza/derivação roda em
-uma única spark.sql() com CTEs (_renomeado -> _limpo -> _sem_delimitador ->
-SELECT final). A SELECT final precisa de uma CTE própria porque lê
-COD_CORES/DESC_CUSTO_MANA já limpos - uma coluna não pode referenciar, no
-mesmo SELECT, outra coluna calculada ali do lado.
+Sem "( ) { }" no dado Silver: símbolos da Scryfall ("{2}{U}{U}"), texto de
+lembrete entre parênteses e dicts serializados viram colchetes. Símbolos
+comuns ganham rótulo legível (ex.: "[White]").
 
-FALLBACK DE ID_ORACLE: partições da Bronze gravadas antes da coluna
-oracle_id existir não a têm - nesse caso ID_ORACLE fica NULL em vez de
-quebrar o pipeline.
-
-PREÇO E MIGRAÇÃO NÃO ESTÃO AQUI: esta tabela tem grão só de "impressão de
-carta". Histórico de preço e id canônico pós-migração vivem em tabelas
-Silver próprias (TB_FATO_PRECOS_CARTAS, TB_MOV_MIGRACOES_CARTAS) - preço junta
-por ID_CARTA (mesmo grão desta tabela); migração junta ID_CARTA =
-ID_CARTA_ANTIGO e usa ID_CARTA_CANONICO.
-
-REGRA "SEM ( ) { } NO DADO SILVER": texto de carta/custo de mana/legalidades
-vem da Scryfall com notação de símbolo entre chaves (ex.: "{2}{U}{U}") e
-texto de lembrete entre parênteses, e legalities é um dict serializado. Tudo
-convertido pra notação com colchetes ([...]) na CTE _sem_delimitador -
-símbolos comuns viram um rótulo legível (ex.: "[White]"), o resto usa um
-catch-all genérico que preserva o conteúdo trocando só o delimitador.
+Preço e migração ficam em TB_FATO_PRECOS_CARTAS (join por ID_CARTA) e
+TB_MOV_MIGRACOES_CARTAS (ID_CARTA = ID_CARTA_ANTIGO).
 """
 
 # =============================================================================
@@ -84,31 +62,22 @@ def setup_logging():
     return logging.getLogger(__name__)
 
 def transform_cards_silver(df):
-    """
-    Transformação específica para tabela Cartas, via uma única spark.sql()
-    com CTEs (WITH ... AS (...)).
-    """
+    """Transformação da tabela Cartas (uma spark.sql() com CTEs)."""
     logger = logging.getLogger(__name__)
     logger.info("Iniciando transformações específicas para Cartas...")
 
     df.createOrReplaceTempView("_cards_bronze")
 
-    # oracle_id pode não existir em partições antigas da Bronze - fallback
-    # NULL tipado evita quebrar o pipeline; as demais colunas sempre existem.
+    # Partições antigas da Bronze não têm oracle_id: ID_ORACLE fica NULL.
     if "oracle_id" in df.columns:
         oracle_id_select = "oracle_id AS ID_ORACLE"
     else:
         logger.warning("Coluna oracle_id ausente na Bronze cards - ID_ORACLE ficará NULL.")
         oracle_id_select = "CAST(NULL AS STRING) AS ID_ORACLE"
 
-    # WITH em CTEs (não temp views): cada CTE materializa a etapa anterior,
-    # então a SELECT final lê COD_CORES/DESC_CUSTO_MANA já limpos, não os
-    # valores crus da Bronze.
-    # Backslash duplicado no regex (\\{ etc.): Spark desfaz um \\ simples antes
-    # de resolver a string; dobrar garante que sobra um só pro regex.
-    # String raw, não f-string: a query tem chaves literais (regex de mana)
-    # que um f-string tentaria interpretar como placeholder - troca
-    # ID_ORACLE via .replace() depois de montar a string.
+    # Regex com backslash dobrado (\\{): o parser do Spark SQL consome um nível.
+    # String raw em vez de f-string por causa das chaves literais do regex;
+    # ID_ORACLE entra via .replace().
     query_cartas = r"""
         WITH _renomeado AS (
             -- Bronze -> nome PT-BR, com filtro de 5 anos no WHERE (avalia
@@ -208,7 +177,7 @@ def transform_cards_silver(df):
 
                 -- DESC_CARTA: símbolos comuns viram rótulo legível ([White] etc.),
                 -- catch-all genérico cobre o resto ({...} e (...) restantes).
-                -- ponytail: não trata "{"/"(" aninhados (não ocorre em carta real).
+                -- Limitação: não trata "{"/"(" aninhados (não ocorre em carta real).
                 regexp_replace(
                 regexp_replace(
                 regexp_replace(
@@ -282,8 +251,6 @@ def transform_cards_silver(df):
     """
     df_silver = spark.sql(query_cartas.replace("__ORACLE_ID_SELECT__", oracle_id_select))
 
-    # Title_Case/"_"/sem-acento (ver normalizar_valor() em silver_utils.py),
-    # de uma vez só, depois que a query acima já resolveu todo o resto.
     df_silver = normalizar_valores(df_silver, [
         "NME_CARTA", "NME_ARTISTA", "NME_RARIDADE", "NME_COLECAO",
         "NME_FORCA", "NME_RESISTENCIA", "DESC_SUBTIPOS", "DESC_TIPOS",
@@ -298,11 +265,8 @@ def transform_cards_silver(df):
 # CONFIGURAÇÃO
 # =============================================================================
 
-# Configuração manual. catalog_name vem do mesmo secret que a Bronze usa
-# (get_secret("catalog_name")).
 config = create_manual_config(get_secret("catalog_name"), get_secret("s3_bucket"))
 
-# Setup Unity Catalog
 setup_unity_catalog(config['catalog_name'], config['schema_silver'])
 
 # COMMAND ----------
@@ -310,16 +274,12 @@ setup_unity_catalog(config['catalog_name'], config['schema_silver'])
 # =============================================================================
 # PROCESSAMENTO USANDO SILVER_UTILS
 # =============================================================================
-# Criar processor
 processor = SilverTableProcessor("TB_FATO_CARTAS", config)
 
-# Extração da Bronze (cards) e transformação específica.
 df_cards_bronze = processor.extract_from_bronze("cards")
 df_silver = processor.transform_data(df_cards_bronze, transform_cards_silver)
 
-# Merge incremental por ID_CARTA, particionado por ANO_INGESTAO/MES_INGESTAO.
-# order_by_col=DT_INGESTAO: em reprocessamento com linha duplicada na mesma
-# chave, mantém a ingestão mais recente em vez de uma linha arbitrária.
+# Chave duplicada no lote: fica a ingestão mais recente (order_by_col).
 processor.save_silver_table(
     df_silver,
     partition_cols=["ANO_INGESTAO", "MES_INGESTAO"],

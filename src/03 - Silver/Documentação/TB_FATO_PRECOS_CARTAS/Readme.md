@@ -9,12 +9,12 @@
 ## 1. Nome da Tabela e Camada
 - **Tabela:** TB_FATO_PRECOS_CARTAS
 - **Camada:** Silver
-- **Classificação DAMA-DMBOK:** Fato - uma linha por coleta de preço de uma IMPRESSÃO de carta (grão), com medidas quantitativas (`VLR_USD`, `VLR_USD_FOIL`, `VLR_USD_ETCHED`, `VLR_EUR`, `VLR_EUR_FOIL`, `VLR_TIX`). As variantes físicas (foil/etched) são colunas da mesma linha, não linhas novas. Fato independente de `TB_FATO_CARTAS` desde #115/#116 - ver "Motivo da Separação" abaixo.
+- **Classificação DAMA-DMBOK:** Fato - uma linha por coleta de preço de uma IMPRESSÃO de carta (grão), com medidas quantitativas (`VLR_USD`, `VLR_USD_FOIL`, `VLR_USD_ETCHED`, `VLR_EUR`, `VLR_EUR_FOIL`, `VLR_TIX`). As variantes físicas (foil/etched) são colunas da mesma linha, não linhas novas. Fato independente de `TB_FATO_CARTAS` - ver o motivo abaixo.
 
 ## 2. Descrição Completa
 Histórico de cotações de preço de cartas de Magic: The Gathering em dólar, euro e MTGO ticket - uma linha por impressão por coleta de preço. Use para acompanhar valorização/desvalorização de uma carta ao longo do tempo, comparar preço entre cartas/coleções ou montar um indicador de valor de coleção. A mesma impressão tem várias linhas (uma por coleta) de propósito - é histórico, não é "o preço atual".
 
-**Motivo da separação (Silver, #115/#116):** cards (Bronze `cards`) e preços (Bronze `card_prices`) são Fatos distintos no mesmo grão de impressão (`ID_CARTA`) - o preço tem, além disso, a data de coleta. A Stage ingere o bulk `default_cards` (1 objeto por impressão, cada um com seu próprio `prices`), e preço por NOME não existe como número único (o Lightning Bolt tem ~70 impressões de preços muito diferentes). Antes desta tabela existir, o preço vivia embutido em `TB_FATO_CARTAS`, obrigando `ID_CARTA` a carregar a data de coleta na chave só por causa do histórico de preço. Manter cada Fato no seu grão natural é mais simples de entender e de consultar - junte por `ID_CARTA` (cada cotação casa com uma só impressão; uma impressão tem N cotações) quando precisar combinar carta e preço.
+**Por que é uma tabela separada de `TB_FATO_CARTAS`:** cards (Bronze `cards`) e preços (Bronze `card_prices`) são Fatos distintos no mesmo grão de impressão (`ID_CARTA`) - o preço tem, além disso, a data de coleta. A Stage ingere o bulk `default_cards` (1 objeto por impressão, cada um com seu próprio `prices`), e preço por NOME não existe como número único (o Lightning Bolt tem ~70 impressões de preços muito diferentes). Com o preço dentro de `TB_FATO_CARTAS`, a chave de cartas teria que incluir a data de coleta. Manter cada Fato no seu grão natural é mais simples de entender e de consultar - junte por `ID_CARTA` (cada cotação casa com uma só impressão; uma impressão tem N cotações) quando precisar combinar carta e preço.
 
 ## 3. Origem dos Dados
 - **Fonte (Bronze):** `card_prices`

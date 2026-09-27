@@ -1,8 +1,7 @@
-# 🥈 Camada Silver - Magic: The Gathering
+# Camada Silver - Magic: The Gathering
 
 <div align="center">
 
-<!-- Imagem ilustrativa da tabela (adicione o link abaixo) -->
 ![RED XIII - Proud Warrior](https://img.mypcards.com/img/1/137/magic_ddajvc_001/magic_ddajvc_001_en.jpg)
 
 
@@ -10,22 +9,22 @@
 
 </div>
 
-## 📋 Visão Geral
+## Visão Geral
 
-Esta pasta contém os notebooks responsáveis pela **camada Silver** do pipeline de dados do Magic: The Gathering. A camada Silver realiza o processo **TL (Transform & Load)**, refinando, limpando e enriquecendo os dados da Bronze para análises avançadas e modelagem de negócio.
+Esta pasta contém os notebooks responsáveis pela **camada Silver** do pipeline de dados do Magic: The Gathering. A camada Silver realiza o processo **TL (Transform & Load)**, limpando, padronizando e enriquecendo os dados da Bronze.
 
-## 🎯 Objetivo
+## Objetivo
 
 Transformar dados estruturados da Bronze em dados limpos, padronizados e enriquecidos na Silver (Unity Catalog/Delta), garantindo:
 - **Transform**: Limpeza, padronização e enriquecimento
-- **Load**: Carregamento incremental com merge inteligente
+- **Load**: Carregamento incremental com merge por chave
 - **Governança**: Controle e rastreabilidade via Unity Catalog
 - **Performance**: Otimização com Delta Lake
 - **Prontidão Analítica**: Dados prontos para análises e camadas superiores
 
-## 🔄 Processo TL (Transform & Load)
+## Processo TL (Transform & Load)
 
-### **Transform - Limpeza e Enriquecimento (SQL)**
+### Transform - Limpeza e Enriquecimento (SQL)
 As regras de negócio de cada notebook são escritas em SQL puro, num `spark.sql()` com CTEs encadeadas (ex.: `_renomeado` -> `_limpo` -> `_sem_delimitador` em `TB_FATO_CARTAS`). Depois do SQL, `normalizar_valores()` (trim, sem acento via UDF, Title Case, espaço vira `_`; NULO, `''` e `'NA'` passam intactos) padroniza as colunas categóricas, e `TB_MOV_MIGRACOES_CARTAS` resolve a cadeia de ids em Python. As colunas saem em PT-BR, 100% MAIÚSCULAS:
 ```python
 spark.sql(r"""
@@ -40,7 +39,7 @@ spark.sql(r"""
 """)
 ```
 
-### **Load - Carregamento na Silver**
+### Load - Carregamento na Silver
 A primeira carga (Delta inexistente) é `overwrite`. As seguintes usam o merge builder do Delta (`DeltaTable.merge()` com `withSchemaEvolution()`), condição nula-segura `silver.<chave> <=> novo.<chave>` (`save_to_silver` em `silver_utils.py`):
 ```python
 (
@@ -54,7 +53,7 @@ A primeira carga (Delta inexistente) é `overwrite`. As seguintes usam o merge b
 ```
 Antes do merge há dedup por chave: `row_number()` (ordem por `order_by_col` desc, nulos por último) quando o notebook informa `order_by_col`; senão `dropDuplicates`.
 
-## 📁 Estrutura dos Notebooks
+## Estrutura dos Notebooks
 
 São 7 notebooks, orquestrados por `.github/DAGs/silver.yml` (detalhe de cada tabela em [`Documentação/Readme.md`](./Documentação/Readme.md)):
 
@@ -70,9 +69,9 @@ São 7 notebooks, orquestrados por `.github/DAGs/silver.yml` (detalhe de cada ta
 
 `TB_PONTE_CARTA_SIMBOLOS` depende de `TB_FATO_CARTAS` e `TB_DOM_SIMBOLOS` no DAG; as demais rodam independentes.
 
-## ⚙️ Configurações Necessárias
+## Configurações Necessárias
 
-### 🔐 Configuração (env var > secret > default)
+### Configuração (env var > secret > default)
 Cada valor é resolvido nesta ordem (`base_utils.py`): env var `MTG_<NOME>` (injetada no deploy) > secret no scope `mtg-pipeline` > default do código.
 ```python
 catalog_name           # MTG_CATALOG_NAME; default mtg_dev (em prd: mtg_prod)
@@ -94,7 +93,7 @@ Com `MTG_ENVIRONMENT=production`, resolver o catálogo para `mtg_dev` é bloquea
     └── TB_PONTE_CARTA_SIMBOLOS
 ```
 
-## 🔄 Fluxo de Execução
+## Fluxo de Execução
 
 ### 1. **Setup Unity Catalog**
 - Criação do catálogo e schema
@@ -120,114 +119,100 @@ Com `MTG_ENVIRONMENT=production`, resolver o catálogo para `mtg_dev` é bloquea
 - Verificação de integridade
 - Logs de processamento
 
-### 🎴 **Flavor Text do Processamento**
-*"Como um alquimista, a camada Silver transmuta dados brutos em informação valiosa, pronta para ser utilizada nas estratégias mais complexas do multiverso analítico."*
+## Controle de Qualidade
 
-## 🛡️ Controle de Qualidade
+### Validações Implementadas
+- **Verificação de DataFrame nulo** (None; DataFrame vazio não é bloqueado)
+- **Remoção de duplicatas**
+- **Compatibilidade de schema**
+- **Merge incremental**
+- **Padronização e enriquecimento**
 
-### **Validações Implementadas**
-- ✅ **Verificação de DataFrame nulo** (None; DataFrame vazio não é bloqueado)
-- ✅ **Remoção de duplicatas**
-- ✅ **Compatibilidade de schema**
-- ✅ **Merge incremental**
-- ✅ **Padronização e enriquecimento**
-
-### **Tratamento de Erros e Recuperação**
+### Tratamento de Erros e Recuperação
 - **Verificação de existência**: Antes de criar/atualizar tabelas
 - **Upsert por chave**: linha com chave existente é sobrescrita inteira (`whenMatchedUpdateAll`); só linhas fora do lote atual ficam intocadas
-- **Rollback automático**: Em caso de falha no merge
+- **Atomicidade**: MERGE do Delta é transacional; falha não deixa escrita parcial
 - **Logs detalhados**: Para debugging e auditoria
 
-### **Logs e Monitoramento**
+### Logs e Monitoramento
 - **Contagem de registros**: Antes e depois do processamento
 - **Schema**: diferença de colunas entre origem e destino é avisada no log
 
-## 📊 Características dos Dados
+## Características dos Dados
 
-### **Cartas e Coleções**
+### Cartas e Coleções
 - **Filtro**: só `TB_FATO_CARTAS` filtra (últimos 60 meses de `DT_INGESTAO`); `TB_DIM_COLECOES` não tem filtro na Silver, mas a Stage já restringe a coleções com `releaseDate` >= 1º de janeiro de (ano atual − `years_back`, padrão 5)
 - **Merge**: Incremental por `ID_CARTA` / `COD_COLECAO`
 - **Particionamento**: `ANO_INGESTAO`/`MES_INGESTAO` (cartas) e `ANO_LANCAMENTO`/`MES_LANCAMENTO` (coleções)
 - **Histórico**: Mantido no Delta Lake
-- **Tipo**: 🃏 Creature/Spell/Artifact (dinâmicos)
+- **Tipo**: Creature/Spell/Artifact (dinâmicos)
 
-### **Dados de Preços (`TB_FATO_PRECOS_CARTAS`)**
+### Dados de Preços (`TB_FATO_PRECOS_CARTAS`)
 - **Grão**: uma cotação por impressão (`ID_CARTA`) por coleta (`DT_INGESTAO`)
 - **Filtro**: nenhum na Silver (não depende de `TB_FATO_CARTAS`); a Stage já restringe a impressões com `releaseDate` >= 1º de janeiro de (ano atual − `years_back`, padrão 5)
 - **Merge**: Incremental por `ID_CARTA` + `DT_INGESTAO`
 - **Particionamento**: `ANO_INGESTAO`/`MES_INGESTAO`
 - **Frequência**: Atualização frequente (preços dinâmicos)
 - **Fonte**: Scryfall (todas as tabelas da Silver vêm da Scryfall)
-- **Tipo**: 💰 Market Data (dados dinâmicos)
+- **Tipo**: Market Data (dados dinâmicos)
 
-### 🎴 **Flavor Text dos Dados**
-*"Na Silver, cada dado é polido como uma joia, revelando seu verdadeiro valor para as estratégias do plano."*
+## Funcionalidades
 
-## 🔧 Funcionalidades Avançadas
-
-### **Merge Incremental Inteligente**
+### Merge Incremental
 ```python
 delta_table.alias("silver").merge(df_final.alias("novo"), "silver.ID_CARTA <=> novo.ID_CARTA") \
     .withSchemaEvolution().whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()
 ```
 
-### **Compatibilidade e Enriquecimento de Schema**
+### Compatibilidade e Enriquecimento de Schema
 - Diferença de schema é só logada; coluna nova entra via `withSchemaEvolution()` no merge
 - Renomeação e padronização de colunas
 - Enriquecimento com colunas derivadas (ex: categorias, flags, métricas)
 - Preservação de dados existentes
 
-### **Metadados das Tabelas**
+### Metadados das Tabelas
 - **`COMMENT ON TABLE`**: descrição de negócio + "Chave única: ..." (de `silver_column_docs.py`)
 - **`COMMENT` por coluna**: vindo de `silver_column_docs.py`
 - **`PRIMARY KEY`**: sempre declarada na chave; a run falha (RuntimeError) se a chave tiver NULO ou duplicata
 - Nenhuma `TBLPROPERTIES` customizada é gravada
 
-### **Particionamento das Tabelas**
+### Particionamento das Tabelas
 - **Dados Temporais**: Particionamento por ano/mês de referência
 - **Dados de Referência**: `TB_DIM_COLECOES` por ano/mês de lançamento; `TB_DOM_SIMBOLOS` sem partição
 - **Dados de Preços**: Particionamento por ano/mês de ingestão
 
-## 🔗 Próximos Passos
+## Próximos Passos
 
 Após o processamento na Silver, os dados estarão disponíveis para:
 1. **Camada Gold**: Modelos de dados finais e métricas
-2. **Análises**: Consultas e dashboards avançados
+2. **Análises**: Consultas e dashboards
 
-## 🏗️ Engenharia de Dados
+## Engenharia de Dados
 
-### 🎴 **Flavor Text da Engenharia**
-*"Como um ourives lapidando gemas raras, a engenharia da Silver transforma dados em insights valiosos, prontos para brilhar nas análises mais exigentes."*
+### Princípios da Camada Silver
 
-### 🎯 Princípios da Camada Silver
+#### 1. Enriquecimento
+- Transformação de dados em informação
+- Colunas derivadas e métricas
+- Padronização e limpeza
+- Metadados organizados
 
-#### **1. Enriquecimento**
-- ✅ Transformação de dados em informação
-- ✅ Colunas derivadas e métricas
-- ✅ Padronização e limpeza
-- ✅ Metadados organizados
+#### 2. Incrementalidade
+- Merge por chave
+- Preservação de histórico
 
-#### **2. Incrementalidade**
-- ✅ Merge inteligente de dados
-- ✅ Preservação de histórico
-- ✅ Performance otimizada
-- ✅ Recuperação de falhas
+#### 3. Governança
+- Unity Catalog para controle
 
-#### **3. Governança**
-- ✅ Unity Catalog para controle
-- ✅ Permissões granulares
-- ✅ Rastreabilidade completa
-- ✅ Auditoria de mudanças
+#### 4. Qualidade
+- Validação de integridade
+- Remoção de duplicatas
+- Compatibilidade de schema
+- Logs estruturados
 
-#### **4. Qualidade**
-- ✅ Validação de integridade
-- ✅ Remoção de duplicatas
-- ✅ Compatibilidade de schema
-- ✅ Logs estruturados
+### Regras da Camada
 
-### 📐 Regras da Camada
-
-#### **Regra #1: Enriquecimento e Padronização (SQL)**
+#### Regra #1: Enriquecimento e Padronização (SQL)
 ```sql
 SELECT
     ...,
@@ -235,66 +220,28 @@ SELECT
 FROM _sem_delimitador
 ```
 
-#### **Regra #2: Merge Incremental**
+#### Regra #2: Merge Incremental
 ```python
 # condição nula-segura, uma por coluna da chave
 merge_condition = " AND ".join(f"silver.{k} <=> novo.{k}" for k in key_cols)
 ```
 
-#### **Regra #3: Compatibilidade de Schema**
+#### Regra #3: Compatibilidade de Schema
 ```python
 # Diferença de schema só é logada; coluna nova entra pelo merge
 .merge(df_final.alias("novo"), merge_condition).withSchemaEvolution()
 ```
 
-#### **Regra #4: Logs Estruturados**
+#### Regra #4: Logs Estruturados
 ```python
 print(f"Merge concluído em {full_table_name}.")
 ```
 
-## 🎴 Galeria Visual - Camada Silver
-
-### 🏗️ Elementos da Camada Silver
-```
-💎 Enriquecimento    🔄 Incrementalidade    🛡️ Governança    📊 Qualidade
-```
-
-### 🧙‍♂️ Personagens da Silver
-```
-🧙‍♂️ Jace Beleren    🦉 Narset    🦅 Teferi    🦋 Tamiyo
-```
-
-### 🔧 Ferramentas do Alquimista
-```
-⚗️ Alembic    🧪 Elixir of Data    🔬 Insight Lens    🏺 Data Vessel
-```
-
-### 🎯 Metodologias da Silver
-```
-💎 Data Enrichment    🔄 Merge Mastery    🛡️ Quality Shield    📊 Metrics Crystal
-```
-
-### 🌟 Propriedades Mágicas
-```
-✨ Silver Layer    🔗 Data Source    ⏰ Processing Time    🎮 Load Mode
-```
-
-### 🏛️ Arquitetura da Silver
-```
-🏛️ Unity Catalog    🗄️ Delta Lake    📁 Schema Silver    🔐 Governance
-```
-
-### 🔄 Operações de Merge
-```
-🔄 Incremental Merge    📊 Schema Compatibility    🛡️ Quality Validation
-⚡ Performance Optimization    📈 Data Monitoring    🔍 Error Handling
-```
-
-## 📞 Suporte
+## Suporte
 
 Para dúvidas ou problemas:
 - Verificar logs de execução
 - Consultar histórico do Delta Lake
 - Revisar configurações de segredos
 - Verificar permissões Unity Catalog
-- Consultar este README para referência 📚 
+- Consultar este README para referência 

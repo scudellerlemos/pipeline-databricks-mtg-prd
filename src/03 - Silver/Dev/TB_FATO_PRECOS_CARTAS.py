@@ -3,38 +3,16 @@
 # CAMADA SILVER - PRECOS DE CARTAS - MAGIC: THE GATHERING
 # =============================================================================
 """
-Script Python para processamento da tabela TB_FATO_PRECOS_CARTAS.
-Transformacao e limpeza de dados da Bronze para Silver.
+TB_FATO_PRECOS_CARTAS: historico de precos, Bronze `card_prices` -> Silver.
 
-CLASSIFICACAO DAMA-DMBOK: Fato - uma linha por coleta de preco de uma
-IMPRESSAO de carta (grao), com medidas quantitativas
-(VLR_USD/VLR_USD_FOIL/VLR_USD_ETCHED/VLR_EUR/VLR_EUR_FOIL/VLR_TIX). A
-fonte cota cada variante fisica da mesma impressao separadamente (foil chega
-a valer multiplos do nao-foil), entao as variantes sao COLUNAS da mesma
-linha, nao linhas novas - o grao continua sendo a impressao.
-Fato independente de TB_FATO_CARTAS - quem
-precisar combinar carta com preco faz o join na Gold por ID_CARTA.
+Fato: uma linha por impressao de carta por coleta. As variantes (foil,
+etched, EUR, TIX) sao colunas da mesma linha. Preco varia por impressao, nao
+por nome, por isso o grao e ID_CARTA; join com TB_FATO_CARTAS e N:1, na Gold.
 
-GRAO: mesmo grao de TB_FATO_CARTAS (impressao), mais a data da coleta.
-Preco em Magic varia por impressao - o Lightning Bolt tem ~70 delas, de
-menos de 1 USD a centenas - entao o preco por NOME nao existe como numero
-unico. A Stage ingere o bulk default_cards (1 objeto por impressao, cada um
-com seu proprio `prices`), por isso ID_CARTA chega ate aqui e o join com
-TB_FATO_CARTAS e N:1 (cada cotacao casa com exatamente uma impressao;
-uma impressao tem N cotacoes, uma por DT_INGESTAO), sem fan-out.
+Chave unica: ID_CARTA + DT_INGESTAO. A Bronze e append-only, entao cada run
+acrescenta a cotacao do dia e o historico se acumula aqui.
 
-CHAVE UNICA: ID_CARTA + DT_INGESTAO (ver save_silver_table no fim do
-notebook). A Bronze card_prices e APPEND-only - sem MERGE/upsert e sem
-deduplicacao por chave de negocio (ver cabecalho de card_prices.py) - entao
-cada execucao acrescenta la a cotacao daquele dia e o historico ja nasce na
-Bronze. A Silver preserva esse historico: cada run acrescenta uma nova linha
-em vez de sobrescrever, e e assim que o historico diario de preco se acumula
-aqui.
-
-CONVENCAO DE NOME/CASE DE COLUNA: mesma de TB_FATO_CARTAS
-(ver docstring de la) - nome de coluna 100% MAIUSCULO, valor de atributo em
-Title_Case por palavra sem acento (normalizar_valor() em silver_utils.py),
-exceto COD_/ID_/URL_* e texto livre longo.
+Mesma convencao de nome/case de TB_FATO_CARTAS.
 """
 
 # =============================================================================
@@ -82,11 +60,8 @@ def transform_card_prices_silver(df):
 
     df.createOrReplaceTempView("_prices_bronze")
 
-    # Renomeia Bronze -> PT-BR, upper() no codigo de colecao (join-key com
-    # TB_FATO_CARTAS), cast de tipo nas colunas de preco (vem como string da
-    # Bronze). ANO_INGESTAO/MES_INGESTAO vem da data da coleta, nao da de
-    # lancamento da colecao. Sem coalesce para 0.0 nas colunas de preco: NULO
-    # significa "sem cotacao encontrada", nao "vale zero".
+    # Preco chega como string da Bronze. NULL = sem cotacao (nao vira 0).
+    # ANO/MES_INGESTAO vem da data da coleta.
     df_final = spark.sql("""
         SELECT
             id AS ID_CARTA,
@@ -122,11 +97,8 @@ def transform_card_prices_silver(df):
 # CONFIGURACAO
 # =============================================================================
 
-# Configuracao manual. catalog_name vem do mesmo secret que a Bronze usa
-# (get_secret("catalog_name")).
 config = create_manual_config(get_secret("catalog_name"), get_secret("s3_bucket"))
 
-# Setup Unity Catalog
 setup_unity_catalog(config['catalog_name'], config['schema_silver'])
 
 # COMMAND ----------
@@ -134,22 +106,13 @@ setup_unity_catalog(config['catalog_name'], config['schema_silver'])
 # =============================================================================
 # PROCESSAMENTO USANDO SILVER_UTILS
 # =============================================================================
-# Criar processor
 processor = SilverTableProcessor("TB_FATO_PRECOS_CARTAS", config)
 
-# Extracao da Bronze (nome real da tabela no catalog, minusculo)
 df_bronze = processor.extract_from_bronze("card_prices")
 
-# Aplicar transformacao especifica
 df_silver = processor.transform_data(df_bronze, transform_card_prices_silver)
 
-# Salvar na Silver com merge incremental por ID_CARTA + DT_INGESTAO (ver
-# docstring da celula anterior - historico diario de preco por impressao).
-# Sem order_by_col: DT_INGESTAO ja esta na propria key_column, entao dentro
-# de uma particao do dedup ela e constante - usa-la como criterio de recencia
-# nao desempata nada (zero variancia). Duplicatas reais de (ID_CARTA,
-# DT_INGESTAO) sao indistinguiveis aqui (mesma impressao, mesma coleta
-# exata) - dropDuplicates padrao resolve sem custo extra de Window/hash.
+# Sem order_by_col: DT_INGESTAO ja faz parte da chave, nao desempata nada.
 processor.save_silver_table(
     df_silver,
     partition_cols=["ANO_INGESTAO", "MES_INGESTAO"],

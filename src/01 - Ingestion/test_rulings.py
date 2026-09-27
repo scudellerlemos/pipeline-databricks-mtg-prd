@@ -1,8 +1,5 @@
-# ponytail: mesma abordagem de test_card_prices.py - _to_ruling_record/
-# fetch_ruling_records vivem dentro da célula "FUNÇÕES ESPECÍFICAS" do
-# notebook (não é um módulo importável por si só), então isto carrega o
-# código-fonte da célula direto do notebook .py e executa com um `requests`
-# fake (índice de bulk-data + payload jsonl gzipado).
+# O notebook não é importável: carrega o código da célula "FUNÇÕES ESPECÍFICAS"
+# e executa com um `requests` fake (índice de bulk-data + jsonl gzipado).
 
 import gzip
 import json
@@ -75,8 +72,7 @@ def test_fetch_ruling_records_maps_fields():
 
 
 def test_fetch_ruling_records_returns_one_row_per_ruling():
-    # 1 oracle_id pode ter varias rulings - grao e 1 linha por ruling, nao 1
-    # por carta (join fica pra Gold).
+    # Grao: 1 linha por ruling, nao por carta.
     rulings = [
         {"oracle_id": "abc", "source": "wotc", "published_at": "2020-01-01", "comment": "A"},
         {"oracle_id": "abc", "source": "wotc", "published_at": "2020-02-01", "comment": "B"},

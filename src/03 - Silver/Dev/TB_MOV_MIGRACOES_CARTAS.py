@@ -3,39 +3,19 @@
 # CAMADA SILVER - MIGRACOES DE ID DE CARTAS - MAGIC: THE GATHERING
 # =============================================================================
 """
-Script Python para processamento da tabela TB_MOV_MIGRACOES_CARTAS.
-Transformacao e limpeza de dados da Bronze para Silver.
+TB_MOV_MIGRACOES_CARTAS: migracoes de id da Scryfall, Bronze `migrations` -> Silver.
 
-CLASSIFICACAO DAMA-DMBOK: MOV (movimento) - cada linha registra um
-identificador de carta MUDANDO de valor ao longo do tempo (a Scryfall unifica
-duas cartas ou remove uma do catalogo, trocando o scryfall_id). Nao e Fato
-(nao ha medida de negocio, so um evento de mudanca de identificador) nem
-Dimensao/DOM (nao descreve uma entidade estavel) - daí o prefixo TB_MOV_.
+Movimento: cada linha e um scryfall_id que mudou (carta unificada em outra ou
+removida). A Gold usa ID_CARTA_ANTIGO -> ID_CARTA_CANONICO para resolver ids
+antigos.
 
-RESOLUCAO DE MIGRACAO VIVE AQUI, NAO EM TB_FATO_CARTAS (ver docstring de
-TB_FATO_PRECOS_CARTAS sobre a separacao de Fatos por fonte) - Gold junta por
-ID_CARTA_ANTIGO/ID_CARTA_CANONICO quando precisar resolver uma migracao no
-meio de uma janela de analise.
+Migracoes podem encadear (A -> B -> C); _resolve_id_chain segue a cadeia em
+Python (o Spark desta versao nao tem CTE recursiva). Ver test_migration_chain.py.
 
-RESOLUCAO EM CADEIA: A mesma migracoes pode encadear (A funde em B, B funde
-em C) - _resolve_id_chain segue a cadeia ate o id final. Puro Python sobre um
-dict pequeno (historico de migracoes, nao dado de carta) - sem exigir SQL
-recursivo, que esta versao do Spark nao suporta via CTE. Testado isoladamente
-em test_migration_chain.py.
+Chave unica: ID_MIGRACAO (nunca nulo na fonte), declarada como PRIMARY KEY.
 
-CHAVE UNICA: ID_MIGRACAO (id do proprio registro de migracao na Scryfall -
-sempre presente e nunca nulo na fonte, ver save_silver_table no fim do
-notebook) - como em TB_FATO_CARTAS, a chave e uma unica coluna NOT
-NULL, Unity Catalog consegue declarar a constraint PRIMARY KEY de verdade.
-
-REGRA "SEM ( ) { } NO DADO SILVER": DESC_NOTA e texto livre da Scryfall e
-pode conter parenteses - mesma conversao pra colchete ([...]) usada em
-TB_FATO_CARTAS, por consistencia em toda a camada Silver.
-
-CONVENCAO DE NOME/CASE DE COLUNA (pedido do usuario): mesma de TB_FATO_CARTAS
-(ver docstring de la) - nome de coluna 100% MAIUSCULO, valor de atributo em
-Title_Case por palavra sem acento (normalizar_valor() em silver_utils.py),
-exceto COD_/ID_/URL_* e texto livre longo.
+DESC_NOTA troca ( ) { } por colchetes, como em TB_FATO_CARTAS.
+Mesma convencao de nome/case de TB_FATO_CARTAS.
 """
 
 # =============================================================================
@@ -76,11 +56,9 @@ def setup_logging():
 
 def _resolve_id_chain(direct_map):
     """
-    Segue a cadeia de merges ID_CARTA_ANTIGO -> ID_CARTA_NOVO ate o id final
-    (A mergeou em B, B mergeou em C -> A resolve pra C). Puro Python sobre um
-    dict pequeno (historico de migracoes da Scryfall, nao dado de carta) - sem
-    exigir SQL recursivo, que esta versao do Spark nao suporta via CTE.
-    Testado isoladamente em test_migration_chain.py.
+    Segue a cadeia ID_CARTA_ANTIGO -> ID_CARTA_NOVO ate o id final
+    (A -> B -> C resolve A para C). Limite de 10 saltos; ciclos param no
+    ultimo id antes de repetir.
     """
     resolved = {}
     for start in direct_map:
@@ -90,8 +68,6 @@ def _resolve_id_chain(direct_map):
         while current in direct_map and hops < 10:
             nxt = direct_map[current]
             if nxt in seen:
-                # ciclo (nao deveria acontecer em dado real da Scryfall) - para
-                # na melhor resolucao encontrada em vez de girar pra sempre
                 break
             current = nxt
             seen.add(current)
@@ -100,22 +76,14 @@ def _resolve_id_chain(direct_map):
     return resolved
 
 def transform_migrations_silver(df):
-    """
-    Transformacao especifica para tabela Migracoes de Id de Cartas, via SQL
-    (spark.sql sobre temp views) seguida da resolucao de cadeia em Python.
-    """
+    """Transformacao da tabela Migracoes de Id de Cartas (SQL sobre temp view)."""
     logger = logging.getLogger(__name__)
     logger.info("Iniciando transformacoes especificas para Migracoes de Id de Cartas...")
 
     df.createOrReplaceTempView("_migrations_bronze")
 
-    # Uma unica query: renomeia Bronze -> PT-BR, traduz
-    # NME_ESTRATEGIA_MIGRACAO pra termo de negocio, limpa DESC_NOTA (NA
-    # quando vazio + parenteses -> colchete, mesma regra de TB_FATO_CARTAS),
-    # cast de data e ja deriva ANO_EXECUCAO/MES_EXECUCAO a partir de
-    # DT_EXECUCAO - usadas so como partition_cols. Title_Case/sem-acento de
-    # NME_CARTA_ASSOCIADA/NME_FONTE fica pra normalizar_valores() depois
-    # (pedido do usuario: sem acento complexo dentro do SQL).
+    # Renomeia Bronze -> PT-BR, traduz a estrategia (merge/delete), limpa
+    # DESC_NOTA e deriva ANO/MES_EXECUCAO para particionamento.
     df_final = spark.sql(r"""
         SELECT
             id AS ID_MIGRACAO,
@@ -156,19 +124,14 @@ def transform_migrations_silver(df):
 
 def attach_canonical_id(df_migrations):
     """
-    Resolve a cadeia de unificacoes (ID_CARTA_ANTIGO -> ID_CARTA_NOVO) e
-    anexa ID_CARTA_CANONICO - o id final apos seguir merges sucessivos.
-    Estrategia 'Remocao' fica fora do mapa de resolucao (sem ID_CARTA_NOVO,
-    nao ha pra onde apontar) - essas linhas mantem
-    ID_CARTA_CANONICO = ID_CARTA_ANTIGO, unico comportamento possivel sem
-    inventar um id que a Scryfall nao forneceu.
+    Anexa ID_CARTA_CANONICO: o id final apos seguir as unificacoes.
+    Linhas de 'Remocao' (sem ID_CARTA_NOVO) ficam com
+    ID_CARTA_CANONICO = ID_CARTA_ANTIGO.
     """
     logger = logging.getLogger(__name__)
 
-    # orderBy antes do collect(): sem ordem explicita o dict abaixo pegaria um
-    # ID_CARTA_NOVO diferente a cada execucao se uma carta migrar mais de uma
-    # vez. Ordenar por DT_EXECUCAO (+ ID_MIGRACAO como desempate) garante que
-    # a migracao mais recente sempre vence.
+    # Ordenado por DT_EXECUCAO (desempate ID_MIGRACAO): se a carta migrou mais
+    # de uma vez, a ultima escrita no dict (a mais recente) vence.
     merge_rows = (
         df_migrations
         .filter("NME_ESTRATEGIA_MIGRACAO = 'Unificacao' AND ID_CARTA_NOVO IS NOT NULL")
@@ -206,11 +169,8 @@ def attach_canonical_id(df_migrations):
 # CONFIGURACAO
 # =============================================================================
 
-# Configuracao manual. catalog_name vem do mesmo secret que a Bronze usa
-# (get_secret("catalog_name")).
 config = create_manual_config(get_secret("catalog_name"), get_secret("s3_bucket"))
 
-# Setup Unity Catalog
 setup_unity_catalog(config['catalog_name'], config['schema_silver'])
 
 # COMMAND ----------
@@ -218,17 +178,13 @@ setup_unity_catalog(config['catalog_name'], config['schema_silver'])
 # =============================================================================
 # PROCESSAMENTO USANDO SILVER_UTILS
 # =============================================================================
-# Criar processor
 processor = SilverTableProcessor("TB_MOV_MIGRACOES_CARTAS", config)
 
-# Extracao da Bronze (nome real da tabela no catalog, minusculo)
 df_bronze = processor.extract_from_bronze("migrations")
 
-# Aplicar transformacao especifica e resolucao de cadeia de migracao
 df_silver_stage = processor.transform_data(df_bronze, transform_migrations_silver)
 df_silver = attach_canonical_id(df_silver_stage)
 
-# Salvar na Silver com merge incremental por ID_MIGRACAO
 processor.save_silver_table(
     df_silver,
     partition_cols=["ANO_EXECUCAO", "MES_EXECUCAO"],
