@@ -10,8 +10,8 @@ from datetime import datetime
 from pyspark.sql.types import *
 
 # =============================================================================
-# FUNÇÕES COMPARTILHADAS (get_secret/setup_s3_storage/http_get_with_retry/
-# save_to_parquet/start_run/finish_run vivem em ingestion_utils.py)
+# FUNÇÕES COMPARTILHADAS (obter_segredo/configurar_armazenamento_s3/obter_http_com_retentativa/
+# salvar_em_parquet/iniciar_execucao/finalizar_execucao vivem em ingestion_utils.py)
 # =============================================================================
 
 # COMMAND ----------
@@ -24,29 +24,29 @@ from pyspark.sql.types import *
 # CONFIGURAÇÕES GLOBAIS
 # =============================================================================
 
-SCRYFALL_API_URL = get_secret("scryfall_api_url")
-SCRYFALL_HEADERS = {"User-Agent": "MTGPipeline/1.0"}
-MAX_RETRIES = int(get_secret("max_retries", "3"))
+URL_API_SCRYFALL = obter_segredo("scryfall_api_url")
+CABECALHOS_SCRYFALL = {"User-Agent": "MTGPipeline/1.0"}
+MAX_TENTATIVAS = int(obter_segredo("max_retries", "3"))
 
 # Configurações do S3
-S3_BUCKET = get_secret("s3_bucket")
-S3_STAGE_PREFIX = get_secret("s3_stage_prefix", "stage")
-S3_BASE_PATH = f"s3://{S3_BUCKET}/{S3_STAGE_PREFIX}"
+BUCKET_S3 = obter_segredo("s3_bucket")
+PREFIXO_S3_STAGE = obter_segredo("s3_stage_prefix", "stage")
+CAMINHO_S3_STAGE = f"s3://{BUCKET_S3}/{PREFIXO_S3_STAGE}"
 
 # Configurações de período
-YEARS_BACK = int(get_secret("years_back", "5"))
-current_year = datetime.now().year
-cutoff_year = current_year - YEARS_BACK
-CUTOFF_DATE = datetime(cutoff_year, 1, 1)
-CUTOFF_DATE_STR = CUTOFF_DATE.strftime("%Y-%m-%d")
+ANOS_RETROATIVOS = int(obter_segredo("years_back", "5"))
+ano_atual = datetime.now().year
+ano_corte = ano_atual - ANOS_RETROATIVOS
+DATA_CORTE = datetime(ano_corte, 1, 1)
+DATA_CORTE_TEXTO = DATA_CORTE.strftime("%Y-%m-%d")
 
 # Log das configurações
 print("=" * 60)
 print("CONFIGURAÇÕES PARA INGESTÃO DE SETS")
 print("=" * 60)
-print("S3_BASE_PATH: [CONFIGURADO]")
-print(f"YEARS_BACK: {YEARS_BACK}")
-print(f"CUTOFF_DATE_STR: {CUTOFF_DATE_STR}")
+print("CAMINHO_S3_STAGE: [CONFIGURADO]")
+print(f"ANOS_RETROATIVOS: {ANOS_RETROATIVOS}")
+print(f"DATA_CORTE_TEXTO: {DATA_CORTE_TEXTO}")
 print("=" * 60)
 
 # COMMAND ----------
@@ -55,7 +55,7 @@ print("=" * 60)
 # FUNÇÕES ESPECÍFICAS DE SETS
 # =============================================================================
 
-SETS_SCHEMA = StructType(
+ESQUEMA_COLECOES = StructType(
     [
         StructField("code", StringType(), True),
         StructField("name", StringType(), True),
@@ -81,22 +81,22 @@ SETS_SCHEMA = StructType(
 )
 
 # Campos legados da magicthegathering.io sem equivalente na Scryfall: sempre
-# None (`source` é preenchido com 'scryfall' pelo save_to_parquet). Ficam no
+# None (`source` é preenchido com 'scryfall' pelo salvar_em_parquet). Ficam no
 # schema porque a Silver (TB_DIM_COLECOES) lê essas colunas (ver README -
 # "Imutabilidade").
-_FIELDS_SEM_EQUIVALENTE_SCRYFALL = (
+_CAMPOS_SEM_EQUIVALENTE_SCRYFALL = (
     'border', 'mkm_id', 'mkm_name', 'gathererCode', 'magicCardsInfoCode',
     'oldCode', 'source', 'booster',
 )
 
-def clean_sets_data(data):
-    cleaned_data = []
-    for item in data:
+def limpar_dados_colecoes(dados):
+    dados_limpos = []
+    for item in dados:
         if isinstance(item, dict):
-            cleaned_item = {}
+            item_limpo = {}
 
             # Mapear campos conhecidos com tipos seguros
-            field_mappings = {
+            mapeamento_campos = {
                 'code': str,
                 'name': str,
                 'type': str,
@@ -109,28 +109,28 @@ def clean_sets_data(data):
             }
 
             # Processar campos conhecidos
-            for field, field_type in field_mappings.items():
-                if field in item:
+            for campo, tipo_campo in mapeamento_campos.items():
+                if campo in item:
                     try:
-                        if item[field] is not None:
-                            cleaned_item[field] = field_type(item[field])
+                        if item[campo] is not None:
+                            item_limpo[campo] = tipo_campo(item[campo])
                         else:
-                            cleaned_item[field] = None
+                            item_limpo[campo] = None
                     except (ValueError, TypeError):
-                        cleaned_item[field] = str(item[field]) if item[field] is not None else None
+                        item_limpo[campo] = str(item[campo]) if item[campo] is not None else None
                 else:
-                    cleaned_item[field] = None
+                    item_limpo[campo] = None
 
-            for field in _FIELDS_SEM_EQUIVALENTE_SCRYFALL:
-                cleaned_item[field] = None
+            for campo in _CAMPOS_SEM_EQUIVALENTE_SCRYFALL:
+                item_limpo[campo] = None
 
-            cleaned_data.append(cleaned_item)
+            dados_limpos.append(item_limpo)
 
-    return cleaned_data
+    return dados_limpos
 
-def _to_set_record(s):
+def _para_registro_colecao(s):
     # Campos legados sem equivalente na Scryfall são preenchidos com None em
-    # clean_sets_data.
+    # limpar_dados_colecoes.
     return {
         "code": s.get("code"),
         "name": s.get("name"),
@@ -143,43 +143,43 @@ def _to_set_record(s):
         "icon_svg_uri": s.get("icon_svg_uri"),
     }
 
-def fetch_all_sets():
+def buscar_todas_colecoes():
     # /sets devolve tudo em 1 request hoje; segue next_page caso passe a paginar.
-    records = []
-    url = f"{SCRYFALL_API_URL}/sets"
+    registros = []
+    url = f"{URL_API_SCRYFALL}/sets"
     while url:
-        resp = http_get_with_retry(url, headers=SCRYFALL_HEADERS, retries=MAX_RETRIES)
-        body = resp.json()
-        records.extend(_to_set_record(s) for s in body["data"])
-        url = body.get("next_page") if body.get("has_more") else None
-    return records
+        resposta = obter_http_com_retentativa(url, cabecalhos=CABECALHOS_SCRYFALL, tentativas=MAX_TENTATIVAS)
+        corpo = resposta.json()
+        registros.extend(_para_registro_colecao(s) for s in corpo["data"])
+        url = corpo.get("next_page") if corpo.get("has_more") else None
+    return registros
 
-def ingest_sets(run=None):
+def ingerir_colecoes(execucao=None):
     print("Iniciando ingestão simples: sets")
 
-    table_data = fetch_all_sets()
-    print(f"Sets obtidos da Scryfall: {len(table_data)}")
+    dados_tabela = buscar_todas_colecoes()
+    print(f"Sets obtidos da Scryfall: {len(dados_tabela)}")
 
     print("Limpando dados de sets...")
-    table_data = clean_sets_data(table_data)
+    dados_tabela = limpar_dados_colecoes(dados_tabela)
 
-    df = save_to_parquet(
-        spark, table_data, "sets", S3_BASE_PATH,
-        schema=SETS_SCHEMA,
-        partition_source_col="releaseDate",
-        cutoff_date_str=CUTOFF_DATE_STR,
-        run=run,
+    df = salvar_em_parquet(
+        spark, dados_tabela, "sets", CAMINHO_S3_STAGE,
+        esquema=ESQUEMA_COLECOES,
+        coluna_origem_particao="releaseDate",
+        data_corte=DATA_CORTE_TEXTO,
+        execucao=execucao,
     )
 
     if df is not None:
-        count = df.count()
-        print(f"sets: {count} registros processados")
+        total = df.count()
+        print(f"sets: {total} registros processados")
         display(df.limit(5))
     return df
 
 # Configurar S3 Storage
-setup_success = setup_s3_storage(S3_BASE_PATH)
-if not setup_success:
+sucesso_configuracao = configurar_armazenamento_s3(CAMINHO_S3_STAGE)
+if not sucesso_configuracao:
     raise Exception("Falha ao configurar S3 storage")
 
 print("Setup concluído com sucesso")
@@ -188,15 +188,15 @@ print("Setup concluído com sucesso")
 
 # Iniciar ingestão de sets
 
-# Executa com controle de execução (ver run_stage_ingestion em ingestion_utils.py)
-sets_df, run = run_stage_ingestion("sets", "sets", ingest_sets, S3_BASE_PATH)
+# Executa com controle de execução (ver executar_ingestao_stage em ingestion_utils.py)
+df_colecoes, execucao = executar_ingestao_stage("sets", "sets", ingerir_colecoes, CAMINHO_S3_STAGE)
 
 # Gerar relatório
 print("=" * 50)
 print("RELATÓRIO DE INGESTÃO DE SETS")
 print("=" * 50)
 
-if sets_df is not None:
+if df_colecoes is not None:
     print("Arquivos salvos")
 
 else:

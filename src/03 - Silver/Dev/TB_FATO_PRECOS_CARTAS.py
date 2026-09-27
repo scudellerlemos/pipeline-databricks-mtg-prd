@@ -42,7 +42,7 @@ import logging
 # =============================================================================
 # CONFIGURACAO INICIAL
 # =============================================================================
-def setup_logging():
+def configurar_logging():
     """Configura logging para o script"""
     logging.basicConfig(
         level=logging.INFO,
@@ -50,7 +50,7 @@ def setup_logging():
     )
     return logging.getLogger(__name__)
 
-def transform_card_prices_silver(df):
+def transformar_precos_cartas_silver(df):
     """
     Transformacao especifica para tabela Precos de Cartas, via SQL
     (spark.sql sobre temp views).
@@ -97,28 +97,28 @@ def transform_card_prices_silver(df):
 # CONFIGURACAO
 # =============================================================================
 
-config = create_manual_config(get_secret("catalog_name"), get_secret("s3_bucket"))
+config = criar_config_manual(obter_segredo("catalog_name"), obter_segredo("s3_bucket"))
 
-setup_unity_catalog(config['catalog_name'], config['schema_silver'])
+configurar_unity_catalog(config['catalog_name'], config['schema_silver'])
 
 # COMMAND ----------
 
 # =============================================================================
 # PROCESSAMENTO USANDO SILVER_UTILS
 # =============================================================================
-processor = SilverTableProcessor("TB_FATO_PRECOS_CARTAS", config)
+processador = SilverTableProcessor("TB_FATO_PRECOS_CARTAS", config)
 
-df_bronze = processor.extract_from_bronze("card_prices")
+df_bronze = processador.extrair_da_bronze("card_prices")
 
-df_silver = processor.transform_data(df_bronze, transform_card_prices_silver)
+df_silver = processador.transformar_dados(df_bronze, transformar_precos_cartas_silver)
 
-# Sem order_by_col: DT_INGESTAO ja faz parte da chave, nao desempata nada.
-processor.save_silver_table(
+# Sem coluna_ordenacao: DT_INGESTAO ja faz parte da chave, nao desempata nada.
+processador.salvar_tabela_silver(
     df_silver,
-    partition_cols=["ANO_INGESTAO", "MES_INGESTAO"],
-    key_column=["ID_CARTA", "DT_INGESTAO"],
-    table_comment=get_table_comment("TB_FATO_PRECOS_CARTAS"),
-    column_comments=get_column_comments("TB_FATO_PRECOS_CARTAS")
+    colunas_particao=["ANO_INGESTAO", "MES_INGESTAO"],
+    coluna_chave=["ID_CARTA", "DT_INGESTAO"],
+    comentario_tabela=obter_comentario_tabela("TB_FATO_PRECOS_CARTAS"),
+    comentarios_colunas=obter_comentarios_colunas("TB_FATO_PRECOS_CARTAS")
 )
 
 # =============================================================================

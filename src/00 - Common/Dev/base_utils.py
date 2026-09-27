@@ -25,47 +25,47 @@ except NameError:
         pass
 
 
-def config_override(secret_name):
-    """Valor da env var MTG_<SECRET_NAME>, ou None.
+def config_do_ambiente(nome_segredo):
+    """Valor da env var MTG_<NOME_SEGREDO>, ou None.
 
     dev e prd dividem o mesmo secret scope (com a config de dev). O que prd
     muda (catalogo, bucket) chega como env var, injetada pelo deploy.py em
-    spark_env_vars. Precedencia no get_secret: env var > secret > default.
+    spark_env_vars. Precedencia no obter_segredo: env var > secret > default.
     """
-    return os.environ.get("MTG_" + secret_name.upper()) or None
+    return os.environ.get("MTG_" + nome_segredo.upper()) or None
 
 
-def _bucket_sem_esquema(secret_name, value):
+def _bucket_sem_esquema(nome_segredo, valor):
     """Remove o "s3://" do s3_bucket, venha de onde vier.
 
     Stage e Bronze montam f"s3://{bucket}/...", entao o valor nao pode trazer o esquema.
     """
-    if secret_name == "s3_bucket" and value.startswith("s3://"):
-        return value[len("s3://"):]
-    return value
+    if nome_segredo == "s3_bucket" and valor.startswith("s3://"):
+        return valor[len("s3://"):]
+    return valor
 
 
-def _barra_catalogo_de_dev_em_producao(secret_name, value):
+def _barra_catalogo_de_dev_em_producao(nome_segredo, valor):
     """Falha se producao resolver o catalogo pra mtg_dev.
 
     dev e prd estao no mesmo workspace: sem MTG_CATALOG_NAME, o job de
     producao gravaria nas tabelas de dev.
     """
     if (
-        secret_name == "catalog_name"
+        nome_segredo == "catalog_name"
         and os.environ.get("MTG_ENVIRONMENT") == "production"
-        and value == "mtg_dev"
+        and valor == "mtg_dev"
     ):
         raise Exception(
             "catalog_name resolveu para mtg_dev com MTG_ENVIRONMENT=production - "
             "injete MTG_CATALOG_NAME no alvo de deploy"
         )
-    return value
+    return valor
 
 # ============================================================================
 # INICIALIZAÇÃO PARA DATABRICKS
 # ============================================================================
-def get_spark_session():
+def obter_sessao_spark():
     """Obtém SparkSession do contexto global do Databricks"""
     try:
         return spark  # Disponível globalmente no Databricks
@@ -76,40 +76,40 @@ def get_spark_session():
 # ============================================================================
 # UNITY CATALOG
 # ============================================================================
-def setup_unity_catalog(catalog, schema):
+def configurar_unity_catalog(catalogo, esquema):
     """
     Configura Unity Catalog criando catalog e schema se necessário
 
     Args:
-        catalog (str): Nome do catalog
-        schema (str): Nome do schema
+        catalogo (str): Nome do catalog
+        esquema (str): Nome do schema
 
     Raises:
         Exception: a original do Spark, se o catalog/schema nao puder ser configurado.
     """
-    spark_session = get_spark_session()
+    sessao_spark = obter_sessao_spark()
     # Tenta USE primeiro: o metastore nao tem storage root default, entao
     # CREATE CATALOG sem MANAGED LOCATION falha mesmo com IF NOT EXISTS.
     try:
-        spark_session.sql(f"USE CATALOG {catalog}")
+        sessao_spark.sql(f"USE CATALOG {catalogo}")
     except Exception:
-        spark_session.sql(f"CREATE CATALOG IF NOT EXISTS {catalog}")
-        spark_session.sql(f"USE CATALOG {catalog}")
-    spark_session.sql(f"CREATE SCHEMA IF NOT EXISTS {schema}")
-    spark_session.sql(f"USE SCHEMA {schema}")
-    print(f"Schema {catalog}.{schema} configurado com sucesso")
+        sessao_spark.sql(f"CREATE CATALOG IF NOT EXISTS {catalogo}")
+        sessao_spark.sql(f"USE CATALOG {catalogo}")
+    sessao_spark.sql(f"CREATE SCHEMA IF NOT EXISTS {esquema}")
+    sessao_spark.sql(f"USE SCHEMA {esquema}")
+    print(f"Schema {catalogo}.{esquema} configurado com sucesso")
 
 # ============================================================================
 # SECRETS
 # ============================================================================
-def get_secret(secret_name, default_value=None, extra_safe_defaults=None):
+def obter_segredo(nome_segredo, valor_padrao=None, padroes_seguros_extras=None):
     """
     Obtém config: env var MTG_<NOME> > secret do scope "mtg-pipeline" > default.
 
     Args:
-        secret_name (str): Nome do secret
-        default_value (str, optional): Valor padrão se secret não for encontrado
-        extra_safe_defaults (dict, optional): Defaults adicionais específicos da
+        nome_segredo (str): Nome do secret
+        valor_padrao (str, optional): Valor padrão se secret não for encontrado
+        padroes_seguros_extras (dict, optional): Defaults adicionais específicos da
             camada chamadora (ex.: {'s3_silver_prefix': '...'} ou {'s3_gold_prefix': '...'})
 
     Returns:
@@ -118,29 +118,29 @@ def get_secret(secret_name, default_value=None, extra_safe_defaults=None):
     Raises:
         Exception: Se secret obrigatório não for encontrado e sem default
     """
-    override = config_override(secret_name)
-    if override:
-        print(f"Config '{secret_name}' veio do ambiente: {override}")
-        return _barra_catalogo_de_dev_em_producao(secret_name, _bucket_sem_esquema(secret_name, override))
+    valor_ambiente = config_do_ambiente(nome_segredo)
+    if valor_ambiente:
+        print(f"Config '{nome_segredo}' veio do ambiente: {valor_ambiente}")
+        return _barra_catalogo_de_dev_em_producao(nome_segredo, _bucket_sem_esquema(nome_segredo, valor_ambiente))
 
     try:
         return _barra_catalogo_de_dev_em_producao(
-            secret_name,
-            _bucket_sem_esquema(secret_name, dbutils.secrets.get(scope="mtg-pipeline", key=secret_name)),
+            nome_segredo,
+            _bucket_sem_esquema(nome_segredo, dbutils.secrets.get(scope="mtg-pipeline", key=nome_segredo)),
         )
     except Exception:
-        if default_value is not None:
-            print(f"Secret '{secret_name}' não encontrado, usando valor padrão: {default_value}")
-            return default_value
+        if valor_padrao is not None:
+            print(f"Secret '{nome_segredo}' não encontrado, usando valor padrão: {valor_padrao}")
+            return valor_padrao
 
         # s3_bucket não tem default: sem ele o pipeline falha em vez de gravar num bucket errado.
-        safe_defaults = {'catalog_name': 'mtg_dev'}
-        safe_defaults.update(extra_safe_defaults or {})
+        padroes_seguros = {'catalog_name': 'mtg_dev'}
+        padroes_seguros.update(padroes_seguros_extras or {})
 
-        if secret_name in safe_defaults:
-            print(f"Secret '{secret_name}' não encontrado, usando valor padrão: {safe_defaults[secret_name]}")
-            return _barra_catalogo_de_dev_em_producao(secret_name, safe_defaults[secret_name])
+        if nome_segredo in padroes_seguros:
+            print(f"Secret '{nome_segredo}' não encontrado, usando valor padrão: {padroes_seguros[nome_segredo]}")
+            return _barra_catalogo_de_dev_em_producao(nome_segredo, padroes_seguros[nome_segredo])
         else:
-            print(f"Secret '{secret_name}' não encontrado e sem valor padrão")
+            print(f"Secret '{nome_segredo}' não encontrado e sem valor padrão")
             print(f"Configure o secret no scope ou a env var MTG_<NOME>")
-            raise Exception(f"Secret '{secret_name}' not configured and no default available")
+            raise Exception(f"Secret '{nome_segredo}' not configured and no default available")

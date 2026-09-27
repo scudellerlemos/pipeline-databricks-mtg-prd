@@ -42,7 +42,7 @@ import logging
 # =============================================================================
 # CONFIGURAÇÃO INICIAL
 # =============================================================================
-def setup_logging():
+def configurar_logging():
     """Configura logging para o script"""
     logging.basicConfig(
         level=logging.INFO,
@@ -50,7 +50,7 @@ def setup_logging():
     )
     return logging.getLogger(__name__)
 
-def transform_sets_silver(df):
+def transformar_colecoes_silver(df):
     """
     Transformação específica para tabela Coleções, via SQL (spark.sql sobre temp views)
     """
@@ -60,12 +60,12 @@ def transform_sets_silver(df):
     df.createOrReplaceTempView("_sets_bronze")
 
     # onlineOnly pode faltar em alguma carga da Bronze: usa NULL boolean.
-    online_only_select = "onlineOnly AS FLG_SOMENTE_ONLINE" if "onlineOnly" in df.columns \
+    expr_somente_online = "onlineOnly AS FLG_SOMENTE_ONLINE" if "onlineOnly" in df.columns \
         else "CAST(NULL AS BOOLEAN) AS FLG_SOMENTE_ONLINE"
 
     # booster_0..19: legado da magicthegathering.io, sempre nulo (a Scryfall
     # não expõe booster). Só renomeia.
-    booster_cols_select = ", ".join(f"booster_{i} AS DESC_BOOSTER_SLOT_{i}" for i in range(20))
+    expr_colunas_booster = ", ".join(f"booster_{i} AS DESC_BOOSTER_SLOT_{i}" for i in range(20))
 
     # Renomeia Bronze -> PT-BR e deriva ANO/MES_LANCAMENTO. NME_FONTE vazio vira 'NA'.
     df_final = spark.sql(f"""
@@ -80,12 +80,12 @@ def transform_sets_silver(df):
             gathererCode AS COD_GATHERER,
             magicCardsInfoCode AS COD_MAGICCARDSINFO,
             oldCode AS COD_ANTIGO,
-            {online_only_select},
+            {expr_somente_online},
             card_count AS QTD_CARTAS,
             upper(parent_set_code) AS COD_COLECAO_PAI,
             block AS NME_BLOCO,
             icon_svg_uri AS URL_ICONE,
-            {booster_cols_select},
+            {expr_colunas_booster},
             ingestion_timestamp AS DT_INGESTAO,
             coalesce(nullif(trim(source), ''), 'NA') AS NME_FONTE,
             endpoint AS DESC_URL_ORIGEM,
@@ -109,28 +109,28 @@ def transform_sets_silver(df):
 # CONFIGURAÇÃO
 # =============================================================================
 
-config = create_manual_config(get_secret("catalog_name"), get_secret("s3_bucket"))
+config = criar_config_manual(obter_segredo("catalog_name"), obter_segredo("s3_bucket"))
 
-setup_unity_catalog(config['catalog_name'], config['schema_silver'])
+configurar_unity_catalog(config['catalog_name'], config['schema_silver'])
 
 # COMMAND ----------
 
 # =============================================================================
 # PROCESSAMENTO USANDO SILVER_UTILS
 # =============================================================================
-processor = SilverTableProcessor("TB_DIM_COLECOES", config)
+processador = SilverTableProcessor("TB_DIM_COLECOES", config)
 
-df_bronze = processor.extract_from_bronze("sets")
+df_bronze = processador.extrair_da_bronze("sets")
 
-df_silver = processor.transform_data(df_bronze, transform_sets_silver)
+df_silver = processador.transformar_dados(df_bronze, transformar_colecoes_silver)
 
-processor.save_silver_table(
+processador.salvar_tabela_silver(
     df_silver,
-    partition_cols=["ANO_LANCAMENTO", "MES_LANCAMENTO"],
-    key_column="COD_COLECAO",
-    order_by_col="DT_INGESTAO",
-    table_comment=get_table_comment("TB_DIM_COLECOES"),
-    column_comments=get_column_comments("TB_DIM_COLECOES")
+    colunas_particao=["ANO_LANCAMENTO", "MES_LANCAMENTO"],
+    coluna_chave="COD_COLECAO",
+    coluna_ordenacao="DT_INGESTAO",
+    comentario_tabela=obter_comentario_tabela("TB_DIM_COLECOES"),
+    comentarios_colunas=obter_comentarios_colunas("TB_DIM_COLECOES")
 )
 
 # =============================================================================

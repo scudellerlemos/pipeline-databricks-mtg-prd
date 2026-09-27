@@ -26,39 +26,39 @@
 # =============================================================================
 # CONFIGURACAO
 # =============================================================================
-CATALOG_NAME = get_secret("catalog_name")
-SCHEMA_NAME = "bronze"
-BRONZE_TABLE_NAME = "rulings"
-STAGE_TABLE_NAME = "rulings"
+NOME_CATALOGO = obter_segredo("catalog_name")
+NOME_ESQUEMA = "bronze"
+NOME_TABELA_BRONZE = "rulings"
+NOME_TABELA_STAGE = "rulings"
 
-S3_BUCKET = get_secret("s3_bucket")
-S3_STAGE_PREFIX = get_secret("s3_stage_prefix", "stage")
-S3_BRONZE_PREFIX = get_secret("s3_bronze_prefix", "bronze")
-S3_STAGE_PATH = f"s3://{S3_BUCKET}/{S3_STAGE_PREFIX}"
-S3_BRONZE_PATH = f"s3://{S3_BUCKET}/{S3_BRONZE_PREFIX}"
+BUCKET_S3 = obter_segredo("s3_bucket")
+PREFIXO_S3_STAGE = obter_segredo("s3_stage_prefix", "stage")
+PREFIXO_S3_BRONZE = obter_segredo("s3_bronze_prefix", "bronze")
+CAMINHO_S3_STAGE = f"s3://{BUCKET_S3}/{PREFIXO_S3_STAGE}"
+CAMINHO_S3_BRONZE = f"s3://{BUCKET_S3}/{PREFIXO_S3_BRONZE}"
 
-setup_unity_catalog(CATALOG_NAME, SCHEMA_NAME)
+configurar_unity_catalog(NOME_CATALOGO, NOME_ESQUEMA)
 
 # COMMAND ----------
 
 # =============================================================================
 # EXECUCAO PRINCIPAL
 # =============================================================================
-rulings_bronze_df, run = run_bronze_ingestion(
-    spark, dbutils, CATALOG_NAME, SCHEMA_NAME,
-    BRONZE_TABLE_NAME, STAGE_TABLE_NAME,
-    S3_STAGE_PATH, S3_BRONZE_PATH,
-    table_comment=get_table_comment(BRONZE_TABLE_NAME),
-    column_comments=get_column_comments(BRONZE_TABLE_NAME),
+df_esclarecimentos_bronze, execucao = executar_ingestao_bronze(
+    spark, dbutils, NOME_CATALOGO, NOME_ESQUEMA,
+    NOME_TABELA_BRONZE, NOME_TABELA_STAGE,
+    CAMINHO_S3_STAGE, CAMINHO_S3_BRONZE,
+    comentario_tabela=obter_comentario_tabela(NOME_TABELA_BRONZE),
+    comentarios_colunas=obter_comentarios_colunas(NOME_TABELA_BRONZE),
 )
 
 print("=" * 50)
 print(f"RELATORIO DE INGESTAO BRONZE - RULINGS")
 print("=" * 50)
 print(
-    f"status={run['status']} "
-    f"arquivos_processados={run['files_processed']} "
-    f"registros_lidos={run['records_read']} "
-    f"registros_gravados={run['records_written']}"
+    f"status={execucao['status']} "
+    f"arquivos_processados={execucao['files_processed']} "
+    f"registros_lidos={execucao['records_read']} "
+    f"registros_gravados={execucao['records_written']}"
 )
 print("=" * 50)

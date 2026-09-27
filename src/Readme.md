@@ -77,7 +77,7 @@ sem prefixo `TB_BRONZE_`, já que vivem no schema `bronze` do Unity Catalog.
 - Enriquecimento com categorias e métricas
 - Nomenclatura 100% PT-BR com prefixo semântico (ID_, NME_, DESC_, COD_, DT_, ANO_, MES_, QTD_, VLR_, NUM_, FLG_, URL_)
 - Nomenclatura de tabela DAMA-DMBOK (Fato/Dimensão/Domínio/Ponte)
-- Regras de negócio em SQL, com duas exceções em Python: a normalização de texto (`normalizar_valores`, UDF) e a resolução da cadeia de migrações de ID (`attach_canonical_id` em TB_MOV_MIGRACOES_CARTAS, no driver)
+- Regras de negócio em SQL, com duas exceções em Python: a normalização de texto (`normalizar_valores`, UDF) e a resolução da cadeia de migrações de ID (`anexar_id_canonico` em TB_MOV_MIGRACOES_CARTAS, no driver)
 
 **Tabelas**:
 - **TB_FATO_CARTAS** - Cartas enriquecidas
@@ -110,38 +110,38 @@ sem prefixo `TB_BRONZE_`, já que vivem no schema `bronze` do Unity Catalog.
 ### 1. Ingestão / Stage (01 - Ingestion)
 ```python
 # Controle de execução: início do run
-run = start_run("cards", endpoint, params)
+execucao = iniciar_execucao("cards", endpoint, parametros)
 
 # Extração da Scryfall com retry/backoff em 429/5xx
-data = http_get_with_retry(url, headers, timeout, retries)
+dados = obter_http_com_retentativa(url, cabecalhos, tempo_limite, tentativas)
 
 # Salvamento em Parquet no Stage (snapshot datado, idempotente)
-save_to_parquet(spark, data, "cards", base_path, schema=CARDS_SCHEMA, run=run)  # -> {base_path}/cards/{year}_{month}_{YYYYMMDD}_cards.parquet
+salvar_em_parquet(spark, dados, "cards", caminho_base, esquema=ESQUEMA_CARTAS, execucao=execucao)  # -> {caminho_base}/cards/{year}_{month}_{YYYYMMDD}_cards.parquet
 
 # Controle de execução: fim do run (SUCCESS/FAILED)
-finish_run(run, base_path, status="SUCCESS")
+finalizar_execucao(execucao, caminho_base, status="SUCCESS")
 ```
 
 ### 2. Bronze (02 - Bronze)
 ```python
 # EL puro: lê só os arquivos novos da Stage e faz append no Delta,
 # sem regra de negócio - ver Dev/bronze_utils.py
-run_bronze_ingestion(
-    spark, dbutils, catalog_name, schema_name="bronze",
-    bronze_table_name="cards", stage_table_name="cards",
-    s3_stage_path=..., s3_bronze_path=...,
-    table_comment=get_table_comment("cards"),
-    column_comments=get_column_comments("cards"),
+executar_ingestao_bronze(
+    spark, dbutils, catalogo, esquema="bronze",
+    nome_tabela_bronze="cards", nome_tabela_stage="cards",
+    caminho_s3_stage=..., caminho_s3_bronze=...,
+    comentario_tabela=obter_comentario_tabela("cards"),
+    comentarios_colunas=obter_comentarios_colunas("cards"),
 )
 ```
 
 ### 3. Silver (03 - Silver)
 ```python
 # Extração da Bronze e transformação via SQL (spark.sql() sobre temp view)
-df_bronze = extract_from_bronze(catalog_name, "cards")
+df_bronze = extrair_da_bronze(catalogo, "cards")
 df_silver = spark.sql("SELECT ... FROM _cards_bronze")  # ver Dev/TB_FATO_CARTAS.py
 # MERGE idempotente na Silver + comentários/PK no Unity Catalog
-save_to_silver(df_silver, catalog_name, "silver", "TB_FATO_CARTAS", s3_silver_path, ...)
+salvar_na_silver(df_silver, catalogo, "silver", "TB_FATO_CARTAS", caminho_s3_silver, ...)
 ```
 
 ### 4. Gold (04 - Gold)
@@ -149,7 +149,7 @@ save_to_silver(df_silver, catalog_name, "silver", "TB_FATO_CARTAS", s3_silver_pa
 # Extração das tabelas Silver e junção via SQL (spark.sql() sobre temp views)
 df_gold = spark.sql("SELECT ... FROM _cartas JOIN _precos ...")  # ver Dev/TB_FATO_MERCADO_CARTAS.py
 # Data quality + MERGE idempotente na Gold + auditoria em TB_AUDITORIA_GOLD
-save_to_gold(df_gold, catalog_name, "gold", "TB_FATO_MERCADO_CARTAS", s3_gold_path, ...)
+salvar_na_gold(df_gold, catalogo, "gold", "TB_FATO_MERCADO_CARTAS", caminho_s3_gold, ...)
 ```
 
 ## Tecnologias Utilizadas
@@ -200,7 +200,7 @@ save_to_gold(df_gold, catalog_name, "gold", "TB_FATO_MERCADO_CARTAS", s3_gold_pa
 ```python
 catalog_name           # Nome do catálogo Unity (opcional: default mtg_dev)
 scryfall_api_url      # URL base da Scryfall API (Stage)
-max_retries           # Tentativas do http_get_with_retry (Stage; default 3)
+max_retries           # Tentativas do obter_http_com_retentativa (Stage; default 3)
 years_back            # Janela de anos da Stage (cards/sets/card_prices; default 5)
 s3_bucket             # Bucket S3 base de todas as camadas (stage/bronze/silver/gold)
 s3_stage_prefix       # Prefixo da camada stage

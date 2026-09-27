@@ -49,7 +49,7 @@ Pipeline de dados para análise de mercado de cartas Magic: The Gathering: colet
 ```
 pipeline-databricks-mtg-dev/
 ├── src/
-│   ├── 00 - Common/Dev/           # base_utils.py (get_secret, trava de catálogo) e smoke_deploy.py
+│   ├── 00 - Common/Dev/           # base_utils.py (obter_segredo, trava de catálogo) e smoke_deploy.py
 │   │
 │   ├── 01 - Ingestion/            # Ingestão de dados da Scryfall API (Stage)
 │   │   ├── cards.py               # Cartas
@@ -198,7 +198,7 @@ PR ──▶ CI ──▶ merge na main ──▶ CI + deploy dev ──▶ prom
 - **URL**: `https://api.scryfall.com`
 - **Dados**: Cartas, Sets, Preços de mercado (USD, EUR, TIX), Símbolos de mana, Rulings, Migrações de ID
 - **Características**: API pública, sem necessidade de chave; bulk-data: cards, card_prices e rulings baixam cada um o seu arquivo em 1 download, sem paginação manual (cards e card_prices baixam o mesmo `default_cards`)
-- **Rate Limiting**: requisições sequenciais com retry/backoff (`http_get_with_retry`) em 429/5xx
+- **Rate Limiting**: requisições sequenciais com retry/backoff (`obter_http_com_retentativa`) em 429/5xx
 
 
 ### Entidades Principais

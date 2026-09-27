@@ -9,7 +9,7 @@ Movimento: cada linha e um scryfall_id que mudou (carta unificada em outra ou
 removida). A Gold usa ID_CARTA_ANTIGO -> ID_CARTA_CANONICO para resolver ids
 antigos.
 
-Migracoes podem encadear (A -> B -> C); _resolve_id_chain segue a cadeia em
+Migracoes podem encadear (A -> B -> C); _resolver_cadeia_ids segue a cadeia em
 Python (o Spark desta versao nao tem CTE recursiva). Ver test_migration_chain.py.
 
 Chave unica: ID_MIGRACAO (nunca nulo na fonte), declarada como PRIMARY KEY.
@@ -46,7 +46,7 @@ from pyspark.sql.functions import col
 # =============================================================================
 # CONFIGURACAO INICIAL
 # =============================================================================
-def setup_logging():
+def configurar_logging():
     """Configura logging para o script"""
     logging.basicConfig(
         level=logging.INFO,
@@ -54,28 +54,28 @@ def setup_logging():
     )
     return logging.getLogger(__name__)
 
-def _resolve_id_chain(direct_map):
+def _resolver_cadeia_ids(mapa_direto):
     """
     Segue a cadeia ID_CARTA_ANTIGO -> ID_CARTA_NOVO ate o id final
     (A -> B -> C resolve A para C). Limite de 10 saltos; ciclos param no
     ultimo id antes de repetir.
     """
-    resolved = {}
-    for start in direct_map:
-        current = start
-        seen = {start}
-        hops = 0
-        while current in direct_map and hops < 10:
-            nxt = direct_map[current]
-            if nxt in seen:
+    resolvidos = {}
+    for inicio in mapa_direto:
+        atual = inicio
+        vistos = {inicio}
+        saltos = 0
+        while atual in mapa_direto and saltos < 10:
+            proximo = mapa_direto[atual]
+            if proximo in vistos:
                 break
-            current = nxt
-            seen.add(current)
-            hops += 1
-        resolved[start] = current
-    return resolved
+            atual = proximo
+            vistos.add(atual)
+            saltos += 1
+        resolvidos[inicio] = atual
+    return resolvidos
 
-def transform_migrations_silver(df):
+def transformar_migracoes_silver(df):
     """Transformacao da tabela Migracoes de Id de Cartas (SQL sobre temp view)."""
     logger = logging.getLogger(__name__)
     logger.info("Iniciando transformacoes especificas para Migracoes de Id de Cartas...")
@@ -122,7 +122,7 @@ def transform_migrations_silver(df):
     logger.info(f"Transformacao Migracoes de Id de Cartas concluida: {df_final.count()} registros")
     return df_final
 
-def attach_canonical_id(df_migrations):
+def anexar_id_canonico(df_migracoes):
     """
     Anexa ID_CARTA_CANONICO: o id final apos seguir as unificacoes.
     Linhas de 'Remocao' (sem ID_CARTA_NOVO) ficam com
@@ -132,29 +132,29 @@ def attach_canonical_id(df_migrations):
 
     # Ordenado por DT_EXECUCAO (desempate ID_MIGRACAO): se a carta migrou mais
     # de uma vez, a ultima escrita no dict (a mais recente) vence.
-    merge_rows = (
-        df_migrations
+    linhas_merge = (
+        df_migracoes
         .filter("NME_ESTRATEGIA_MIGRACAO = 'Unificacao' AND ID_CARTA_NOVO IS NOT NULL")
         .select("ID_CARTA_ANTIGO", "ID_CARTA_NOVO", "DT_EXECUCAO", "ID_MIGRACAO")
         .distinct()
         .orderBy("ID_CARTA_ANTIGO", "DT_EXECUCAO", "ID_MIGRACAO")
         .collect()
     )
-    direct_map = {}
-    for r in merge_rows:
-        direct_map[r["ID_CARTA_ANTIGO"]] = r["ID_CARTA_NOVO"]
-    resolved_map = _resolve_id_chain(direct_map)
+    mapa_direto = {}
+    for r in linhas_merge:
+        mapa_direto[r["ID_CARTA_ANTIGO"]] = r["ID_CARTA_NOVO"]
+    mapa_resolvido = _resolver_cadeia_ids(mapa_direto)
 
-    if not resolved_map:
-        return df_migrations.withColumn("ID_CARTA_CANONICO", col("ID_CARTA_ANTIGO"))
+    if not mapa_resolvido:
+        return df_migracoes.withColumn("ID_CARTA_CANONICO", col("ID_CARTA_ANTIGO"))
 
-    df_map = spark.createDataFrame(
-        list(resolved_map.items()), ["_old_id", "_canonical_id"]
+    df_mapa = spark.createDataFrame(
+        list(mapa_resolvido.items()), ["_old_id", "_canonical_id"]
     )
-    df_map.createOrReplaceTempView("_migration_resolved_map")
-    df_migrations.createOrReplaceTempView("_migrations_pre_canonical")
+    df_mapa.createOrReplaceTempView("_migration_resolved_map")
+    df_migracoes.createOrReplaceTempView("_migrations_pre_canonical")
 
-    df_result = spark.sql("""
+    df_resultado = spark.sql("""
         SELECT
             mig.*,
             coalesce(map._canonical_id, mig.ID_CARTA_ANTIGO) AS ID_CARTA_CANONICO
@@ -162,36 +162,36 @@ def attach_canonical_id(df_migrations):
         LEFT JOIN _migration_resolved_map map
             ON mig.ID_CARTA_ANTIGO = map._old_id
     """)
-    logger.info(f"ID_CARTA_CANONICO resolvido para {len(resolved_map)} ids migrados.")
-    return df_result
+    logger.info(f"ID_CARTA_CANONICO resolvido para {len(mapa_resolvido)} ids migrados.")
+    return df_resultado
 
 # =============================================================================
 # CONFIGURACAO
 # =============================================================================
 
-config = create_manual_config(get_secret("catalog_name"), get_secret("s3_bucket"))
+config = criar_config_manual(obter_segredo("catalog_name"), obter_segredo("s3_bucket"))
 
-setup_unity_catalog(config['catalog_name'], config['schema_silver'])
+configurar_unity_catalog(config['catalog_name'], config['schema_silver'])
 
 # COMMAND ----------
 
 # =============================================================================
 # PROCESSAMENTO USANDO SILVER_UTILS
 # =============================================================================
-processor = SilverTableProcessor("TB_MOV_MIGRACOES_CARTAS", config)
+processador = SilverTableProcessor("TB_MOV_MIGRACOES_CARTAS", config)
 
-df_bronze = processor.extract_from_bronze("migrations")
+df_bronze = processador.extrair_da_bronze("migrations")
 
-df_silver_stage = processor.transform_data(df_bronze, transform_migrations_silver)
-df_silver = attach_canonical_id(df_silver_stage)
+df_silver_parcial = processador.transformar_dados(df_bronze, transformar_migracoes_silver)
+df_silver = anexar_id_canonico(df_silver_parcial)
 
-processor.save_silver_table(
+processador.salvar_tabela_silver(
     df_silver,
-    partition_cols=["ANO_EXECUCAO", "MES_EXECUCAO"],
-    key_column="ID_MIGRACAO",
-    order_by_col="DT_INGESTAO",
-    table_comment=get_table_comment("TB_MOV_MIGRACOES_CARTAS"),
-    column_comments=get_column_comments("TB_MOV_MIGRACOES_CARTAS")
+    colunas_particao=["ANO_EXECUCAO", "MES_EXECUCAO"],
+    coluna_chave="ID_MIGRACAO",
+    coluna_ordenacao="DT_INGESTAO",
+    comentario_tabela=obter_comentario_tabela("TB_MOV_MIGRACOES_CARTAS"),
+    comentarios_colunas=obter_comentarios_colunas("TB_MOV_MIGRACOES_CARTAS")
 )
 
 # =============================================================================

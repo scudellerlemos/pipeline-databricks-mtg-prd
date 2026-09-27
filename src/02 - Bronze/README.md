@@ -17,7 +17,7 @@ schema, particionamento): [`Documentação/README.md`](./Documentação/README.m
 `symbology`, `rulings`, `migrations` - sem prefixo `TB_BRONZE_`, já que estão
 dentro do schema `bronze` no Unity Catalog (`{catalog}.bronze.cards`, etc.).
 Cada uma tem um notebook em [`Dev/`](./Dev) (mesmo nome da tabela) que só
-configura os parâmetros e chama `run_bronze_ingestion(...)`, definida em
+configura os parâmetros e chama `executar_ingestao_bronze(...)`, definida em
 [`Dev/bronze_utils.py`](./Dev/bronze_utils.py).
 
 ## Como executar

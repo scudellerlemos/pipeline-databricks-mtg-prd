@@ -4,8 +4,8 @@
 # ============================================================================
 """
 Comentários de tabela e coluna da Silver, aplicados no Unity Catalog por
-save_silver_table. Cada notebook chama get_table_comment(nome) e
-get_column_comments(nome) após %run ./silver_column_docs.
+salvar_tabela_silver. Cada notebook chama obter_comentario_tabela(nome) e
+obter_comentarios_colunas(nome) após %run ./silver_column_docs.
 
 Descrições de negócio (o que a coluna significa), não de cálculo.
 Os READMEs de Documentação/ repetem este texto à mão: ao mudar aqui, mudar lá.
@@ -13,7 +13,7 @@ Os READMEs de Documentação/ repetem este texto à mão: ao mudar aqui, mudar l
 
 # Colunas de linhagem (Stage/Bronze), iguais em todas as tabelas Silver
 # exceto TB_PONTE_CARTA_SIMBOLOS.
-COMMON_COLUMNS = {
+COLUNAS_COMUNS = {
     "DT_INGESTAO": "Início da execução da Stage que gravou o registro (mesmo valor em todas as linhas da run).",
     "NME_FONTE": "Fonte de dados de origem ('Scryfall'; 'scryfall' minúsculo só em TB_FATO_CARTAS).",
     "DESC_URL_ORIGEM": "Nome lógico da tabela de origem na Stage (ex.: 'cards'), não a URL da API.",
@@ -22,7 +22,7 @@ COMMON_COLUMNS = {
     "DT_INGESTAO_BRONZE": "Data/hora em que a Bronze processou o registro - usado só para auditoria/rastreabilidade.",
 }
 
-SILVER_TABLES = {
+TABELAS_SILVER = {
     "TB_FATO_CARTAS": {
         "comment": "Catálogo de cartas de Magic: The Gathering - uma linha por impressão/edição de carta, pronta para análise de gameplay, deckbuilding e coleção. Responde 'o que é essa carta': texto de regras, custo de mana, tipo, raridade, artista e em qual coleção ela saiu. Preço e histórico de migração de id ficam em tabelas próprias (TB_FATO_PRECOS_CARTAS, TB_MOV_MIGRACOES_CARTAS) - preço junta por ID_CARTA; migração junta ID_CARTA = ID_CARTA_ANTIGO e usa ID_CARTA_CANONICO.",
         "columns": {
@@ -166,22 +166,22 @@ SILVER_TABLES = {
 }
 
 
-def get_table_comment(silver_table_name):
-    return SILVER_TABLES.get(silver_table_name, {}).get("comment")
+def obter_comentario_tabela(nome_tabela_silver):
+    return TABELAS_SILVER.get(nome_tabela_silver, {}).get("comment")
 
 
-def get_column_comments(silver_table_name):
-    """COMMON_COLUMNS + colunas específicas da tabela (específica vence em conflito de chave)."""
-    table_columns = SILVER_TABLES.get(silver_table_name, {}).get("columns", {})
-    return {**COMMON_COLUMNS, **table_columns}
+def obter_comentarios_colunas(nome_tabela_silver):
+    """COLUNAS_COMUNS + colunas específicas da tabela (específica vence em conflito de chave)."""
+    colunas_tabela = TABELAS_SILVER.get(nome_tabela_silver, {}).get("columns", {})
+    return {**COLUNAS_COMUNS, **colunas_tabela}
 
 
 if __name__ == "__main__":
-    for table_name in SILVER_TABLES:
-        assert get_table_comment(table_name), f"{table_name} sem comment de tabela"
-    cartas_comments = get_column_comments("TB_FATO_CARTAS")
-    assert cartas_comments["DT_INGESTAO"] == COMMON_COLUMNS["DT_INGESTAO"]
-    assert cartas_comments["NME_CARTA"] == SILVER_TABLES["TB_FATO_CARTAS"]["columns"]["NME_CARTA"]
-    assert get_table_comment("inexistente") is None
-    assert get_column_comments("inexistente") == COMMON_COLUMNS
+    for nome_tabela in TABELAS_SILVER:
+        assert obter_comentario_tabela(nome_tabela), f"{nome_tabela} sem comment de tabela"
+    comentarios_cartas = obter_comentarios_colunas("TB_FATO_CARTAS")
+    assert comentarios_cartas["DT_INGESTAO"] == COLUNAS_COMUNS["DT_INGESTAO"]
+    assert comentarios_cartas["NME_CARTA"] == TABELAS_SILVER["TB_FATO_CARTAS"]["columns"]["NME_CARTA"]
+    assert obter_comentario_tabela("inexistente") is None
+    assert obter_comentarios_colunas("inexistente") == COLUNAS_COMUNS
     print("silver_column_docs: OK")

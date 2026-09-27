@@ -5,59 +5,59 @@ import json
 import os
 import sys
 
-_NB_PATH = os.path.join(os.path.dirname(__file__), "migrations.py")
-_MARKER = "FUNÇÕES ESPECÍFICAS DE MIGRATIONS"
+_CAMINHO_NOTEBOOK = os.path.join(os.path.dirname(__file__), "migrations.py")
+_MARCADOR = "FUNÇÕES ESPECÍFICAS DE MIGRATIONS"
 
 
-def _load_functions(fake_get):
-    cells = open(_NB_PATH, encoding="utf-8").read().split("# COMMAND ----------")
-    cell_source = next(c for c in cells if _MARKER in c)
+def _carregar_funcoes(requisicao_falsa):
+    celulas = open(_CAMINHO_NOTEBOOK, encoding="utf-8").read().split("# COMMAND ----------")
+    codigo_celula = next(c for c in celulas if _MARCADOR in c)
 
-    ns = {
-        "http_get_with_retry": lambda url, headers=None, timeout=30, retries=3: fake_get(url, headers=headers, timeout=timeout),
-        "StructType": lambda fields: None,
+    escopo = {
+        "obter_http_com_retentativa": lambda url, cabecalhos=None, tempo_limite=30, tentativas=3: requisicao_falsa(url, cabecalhos=cabecalhos, tempo_limite=tempo_limite),
+        "StructType": lambda campos: None,
         "StructField": lambda *a, **k: None,
         "StringType": lambda: None,
-        "SCRYFALL_API_URL": "https://api.scryfall.test",
-        "SCRYFALL_HEADERS": {},
-        "MAX_RETRIES": 3,
-        "setup_s3_storage": lambda *a, **k: True,
-        "S3_BASE_PATH": "s3://test-bucket/stage",
+        "URL_API_SCRYFALL": "https://api.scryfall.test",
+        "CABECALHOS_SCRYFALL": {},
+        "MAX_TENTATIVAS": 3,
+        "configurar_armazenamento_s3": lambda *a, **k: True,
+        "CAMINHO_S3_STAGE": "s3://test-bucket/stage",
     }
-    exec(cell_source, ns)
-    return ns["_to_migration_record"], ns["fetch_all_migrations"]
+    exec(codigo_celula, escopo)
+    return escopo["_para_registro_migracao"], escopo["buscar_todas_migracoes"]
 
 
 class _Resp:
-    def __init__(self, json_data):
-        self._json = json_data
+    def __init__(self, dados_json):
+        self._dados_json = dados_json
 
     def json(self):
-        return self._json
+        return self._dados_json
 
     def raise_for_status(self):
         pass
 
 
-def _fake_get_for(pages):
-    # pages: lista de listas de migration-dicts, 1 lista por página
-    calls = {"n": 0}
+def _requisicao_falsa_para(paginas):
+    # paginas: lista de listas de migration-dicts, 1 lista por página
+    chamadas = {"n": 0}
 
-    def fake_get(url, headers=None, timeout=None):
-        i = calls["n"]
-        calls["n"] += 1
-        has_more = i < len(pages) - 1
+    def requisicao_falsa(url, cabecalhos=None, tempo_limite=None):
+        i = chamadas["n"]
+        chamadas["n"] += 1
+        tem_mais = i < len(paginas) - 1
         return _Resp({
             "object": "list",
-            "has_more": has_more,
-            "next_page": f"https://api.scryfall.test/migrations?page={i + 2}" if has_more else None,
-            "data": pages[i],
+            "has_more": tem_mais,
+            "next_page": f"https://api.scryfall.test/migrations?page={i + 2}" if tem_mais else None,
+            "data": paginas[i],
         })
-    return fake_get
+    return requisicao_falsa
 
 
-def test_fetch_all_migrations_maps_delete_and_merge_fields():
-    migrations_data = [
+def test_buscar_todas_migracoes_mapeia_campos_de_delete_e_merge():
+    dados_migracoes = [
         {
             "id": "18045879-f920-4fc9-95e5-58cc58d6c6c1",
             "uri": "https://api.scryfall.com/migrations/18045879-f920-4fc9-95e5-58cc58d6c6c1",
@@ -93,26 +93,26 @@ def test_fetch_all_migrations_maps_delete_and_merge_fields():
         },
     ]
 
-    _, fetch_all_migrations = _load_functions(_fake_get_for([migrations_data]))
-    records = fetch_all_migrations()
+    _, buscar_todas_migracoes = _carregar_funcoes(_requisicao_falsa_para([dados_migracoes]))
+    registros = buscar_todas_migracoes()
 
-    assert len(records) == 2
+    assert len(registros) == 2
 
-    delete_rec = records[0]
-    assert delete_rec["migration_strategy"] == "delete"
-    assert delete_rec["old_scryfall_id"] == "466a7198-d022-47af-a7c5-351a54eb71de"
-    assert delete_rec["new_scryfall_id"] is None  # delete não tem new_scryfall_id
-    assert delete_rec["metadata_name"] == "Xyris, the Writhing Storm"
-    assert delete_rec["metadata_oracle_id"] == "8687948c-456b-495b-9b31-f818c65624b6"
+    registro_remocao = registros[0]
+    assert registro_remocao["migration_strategy"] == "delete"
+    assert registro_remocao["old_scryfall_id"] == "466a7198-d022-47af-a7c5-351a54eb71de"
+    assert registro_remocao["new_scryfall_id"] is None  # delete não tem new_scryfall_id
+    assert registro_remocao["metadata_name"] == "Xyris, the Writhing Storm"
+    assert registro_remocao["metadata_oracle_id"] == "8687948c-456b-495b-9b31-f818c65624b6"
 
-    merge_rec = records[1]
-    assert merge_rec["migration_strategy"] == "merge"
-    assert merge_rec["new_scryfall_id"] == "d2b59872-0e11-41c3-9858-3e2dd5a1c3c3"
-    assert merge_rec["metadata_set_code"] == "hob"
+    registro_fusao = registros[1]
+    assert registro_fusao["migration_strategy"] == "merge"
+    assert registro_fusao["new_scryfall_id"] == "d2b59872-0e11-41c3-9858-3e2dd5a1c3c3"
+    assert registro_fusao["metadata_set_code"] == "hob"
 
 
-def test_fetch_all_migrations_follows_pagination():
-    def _fake_migration(i):
+def test_buscar_todas_migracoes_segue_a_paginacao():
+    def _migracao_falsa(i):
         return {
             "id": f"id-{i}", "uri": f"https://x/{i}", "performed_at": "2026-01-01",
             "migration_strategy": "delete", "old_scryfall_id": f"old-{i}", "note": None,
@@ -120,17 +120,17 @@ def test_fetch_all_migrations_follows_pagination():
                          "set_code": "abc", "oracle_id": f"oracle-{i}", "collector_number": str(i)},
         }
 
-    pages = [[_fake_migration(i) for i in range(3)], [_fake_migration(i) for i in range(3, 5)]]
+    paginas = [[_migracao_falsa(i) for i in range(3)], [_migracao_falsa(i) for i in range(3, 5)]]
 
-    _, fetch_all_migrations = _load_functions(_fake_get_for(pages))
-    records = fetch_all_migrations()
+    _, buscar_todas_migracoes = _carregar_funcoes(_requisicao_falsa_para(paginas))
+    registros = buscar_todas_migracoes()
 
-    assert len(records) == 5
-    assert [r["id"] for r in records] == ["id-0", "id-1", "id-2", "id-3", "id-4"]
+    assert len(registros) == 5
+    assert [r["id"] for r in registros] == ["id-0", "id-1", "id-2", "id-3", "id-4"]
 
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    test_fetch_all_migrations_maps_delete_and_merge_fields()
-    test_fetch_all_migrations_follows_pagination()
+    test_buscar_todas_migracoes_mapeia_campos_de_delete_e_merge()
+    test_buscar_todas_migracoes_segue_a_paginacao()
     print("OK")

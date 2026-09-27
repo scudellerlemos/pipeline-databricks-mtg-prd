@@ -40,24 +40,24 @@ spark.sql(r"""
 ```
 
 ### Load - Carregamento na Silver
-A primeira carga (Delta inexistente) é `overwrite`. As seguintes usam o merge builder do Delta (`DeltaTable.merge()` com `withSchemaEvolution()`), condição nula-segura `silver.<chave> <=> novo.<chave>` (`save_to_silver` em `silver_utils.py`):
+A primeira carga (Delta inexistente) é `overwrite`. As seguintes usam o merge builder do Delta (`DeltaTable.merge()` com `withSchemaEvolution()`), condição nula-segura `silver.<chave> <=> novo.<chave>` (`salvar_na_silver` em `silver_utils.py`):
 ```python
 (
-    DeltaTable.forPath(spark, delta_path).alias("silver")
-    .merge(df_final.alias("novo"), merge_condition)
+    DeltaTable.forPath(spark, caminho_delta).alias("silver")
+    .merge(df_final.alias("novo"), condicao_merge)
     .withSchemaEvolution()
     .whenMatchedUpdateAll()
     .whenNotMatchedInsertAll()
     .execute()
 )
 ```
-Antes do merge há dedup por chave: `row_number()` (ordem por `order_by_col` desc, nulos por último) quando o notebook informa `order_by_col`; senão `dropDuplicates`.
+Antes do merge há dedup por chave: `row_number()` (ordem por `coluna_ordenacao` desc, nulos por último) quando o notebook informa `coluna_ordenacao`; senão `dropDuplicates`.
 
 ## Estrutura dos Notebooks
 
 São 7 notebooks, orquestrados por `.github/DAGs/silver.yml` (detalhe de cada tabela em [`Documentação/Readme.md`](./Documentação/Readme.md)):
 
-| Notebook | Chave | `order_by_col` (dedup) | Partição |
+| Notebook | Chave | `coluna_ordenacao` (dedup) | Partição |
 |---|---|---|---|
 | `TB_FATO_CARTAS.py` | `ID_CARTA` | `DT_INGESTAO` | `ANO_INGESTAO`/`MES_INGESTAO` |
 | `TB_DIM_COLECOES.py` | `COD_COLECAO` | `DT_INGESTAO` | `ANO_LANCAMENTO`/`MES_LANCAMENTO` |
@@ -160,7 +160,7 @@ Com `MTG_ENVIRONMENT=production`, resolver o catálogo para `mtg_dev` é bloquea
 
 ### Merge Incremental
 ```python
-delta_table.alias("silver").merge(df_final.alias("novo"), "silver.ID_CARTA <=> novo.ID_CARTA") \
+tabela_delta.alias("silver").merge(df_final.alias("novo"), "silver.ID_CARTA <=> novo.ID_CARTA") \
     .withSchemaEvolution().whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()
 ```
 
@@ -223,18 +223,18 @@ FROM _sem_delimitador
 #### Regra #2: Merge Incremental
 ```python
 # condição nula-segura, uma por coluna da chave
-merge_condition = " AND ".join(f"silver.{k} <=> novo.{k}" for k in key_cols)
+condicao_merge = " AND ".join(f"silver.{k} <=> novo.{k}" for k in colunas_chave)
 ```
 
 #### Regra #3: Compatibilidade de Schema
 ```python
 # Diferença de schema só é logada; coluna nova entra pelo merge
-.merge(df_final.alias("novo"), merge_condition).withSchemaEvolution()
+.merge(df_final.alias("novo"), condicao_merge).withSchemaEvolution()
 ```
 
 #### Regra #4: Logs Estruturados
 ```python
-print(f"Merge concluído em {full_table_name}.")
+print(f"Merge concluído em {nome_completo_tabela}.")
 ```
 
 ## Suporte

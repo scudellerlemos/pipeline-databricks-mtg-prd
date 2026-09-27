@@ -53,7 +53,7 @@ import logging
 # =============================================================================
 # CONFIGURAÇÃO INICIAL
 # =============================================================================
-def setup_logging():
+def configurar_logging():
     """Configura logging para o script"""
     logging.basicConfig(
         level=logging.INFO,
@@ -61,7 +61,7 @@ def setup_logging():
     )
     return logging.getLogger(__name__)
 
-def transform_cards_silver(df):
+def transformar_cartas_silver(df):
     """Transformação da tabela Cartas (uma spark.sql() com CTEs)."""
     logger = logging.getLogger(__name__)
     logger.info("Iniciando transformações específicas para Cartas...")
@@ -70,15 +70,15 @@ def transform_cards_silver(df):
 
     # Partições antigas da Bronze não têm oracle_id: ID_ORACLE fica NULL.
     if "oracle_id" in df.columns:
-        oracle_id_select = "oracle_id AS ID_ORACLE"
+        expr_id_oracle = "oracle_id AS ID_ORACLE"
     else:
         logger.warning("Coluna oracle_id ausente na Bronze cards - ID_ORACLE ficará NULL.")
-        oracle_id_select = "CAST(NULL AS STRING) AS ID_ORACLE"
+        expr_id_oracle = "CAST(NULL AS STRING) AS ID_ORACLE"
 
     # Regex com backslash dobrado (\\{): o parser do Spark SQL consome um nível.
     # String raw em vez de f-string por causa das chaves literais do regex;
     # ID_ORACLE entra via .replace().
-    query_cartas = r"""
+    consulta_cartas = r"""
         WITH _renomeado AS (
             -- Bronze -> nome PT-BR, com filtro de 5 anos no WHERE (avalia
             -- contra ingestion_timestamp antes do SELECT aplicar o alias).
@@ -249,7 +249,7 @@ def transform_cards_silver(df):
             month(DT_INGESTAO) AS MES_INGESTAO
         FROM _sem_delimitador
     """
-    df_silver = spark.sql(query_cartas.replace("__ORACLE_ID_SELECT__", oracle_id_select))
+    df_silver = spark.sql(consulta_cartas.replace("__ORACLE_ID_SELECT__", expr_id_oracle))
 
     df_silver = normalizar_valores(df_silver, [
         "NME_CARTA", "NME_ARTISTA", "NME_RARIDADE", "NME_COLECAO",
@@ -265,28 +265,28 @@ def transform_cards_silver(df):
 # CONFIGURAÇÃO
 # =============================================================================
 
-config = create_manual_config(get_secret("catalog_name"), get_secret("s3_bucket"))
+config = criar_config_manual(obter_segredo("catalog_name"), obter_segredo("s3_bucket"))
 
-setup_unity_catalog(config['catalog_name'], config['schema_silver'])
+configurar_unity_catalog(config['catalog_name'], config['schema_silver'])
 
 # COMMAND ----------
 
 # =============================================================================
 # PROCESSAMENTO USANDO SILVER_UTILS
 # =============================================================================
-processor = SilverTableProcessor("TB_FATO_CARTAS", config)
+processador = SilverTableProcessor("TB_FATO_CARTAS", config)
 
-df_cards_bronze = processor.extract_from_bronze("cards")
-df_silver = processor.transform_data(df_cards_bronze, transform_cards_silver)
+df_cartas_bronze = processador.extrair_da_bronze("cards")
+df_silver = processador.transformar_dados(df_cartas_bronze, transformar_cartas_silver)
 
-# Chave duplicada no lote: fica a ingestão mais recente (order_by_col).
-processor.save_silver_table(
+# Chave duplicada no lote: fica a ingestão mais recente (coluna_ordenacao).
+processador.salvar_tabela_silver(
     df_silver,
-    partition_cols=["ANO_INGESTAO", "MES_INGESTAO"],
-    key_column="ID_CARTA",
-    order_by_col="DT_INGESTAO",
-    table_comment=get_table_comment("TB_FATO_CARTAS"),
-    column_comments=get_column_comments("TB_FATO_CARTAS")
+    colunas_particao=["ANO_INGESTAO", "MES_INGESTAO"],
+    coluna_chave="ID_CARTA",
+    coluna_ordenacao="DT_INGESTAO",
+    comentario_tabela=obter_comentario_tabela("TB_FATO_CARTAS"),
+    comentarios_colunas=obter_comentarios_colunas("TB_FATO_CARTAS")
 )
 
 # =============================================================================

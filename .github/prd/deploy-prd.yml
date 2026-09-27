@@ -79,7 +79,7 @@ jobs:
           MTG_PAUSE_STATUS: "UNPAUSED"
           # Email do alerta on_failure de todos os jobs.
           MTG_ALERT_EMAIL: ${{ vars.MTG_ALERT_EMAIL }}
-          # Config do ambiente: vai pro spark_env_vars e get_secret() prioriza
+          # Config do ambiente: vai pro spark_env_vars e obter_segredo() prioriza
           # env var sobre o secret scope. Nao ha scope de prd: o "mtg-pipeline"
           # tem a config de dev e o que prd sobrescreve fica aqui.
           MTG_ENVIRONMENT: "production"

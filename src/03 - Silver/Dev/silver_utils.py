@@ -15,13 +15,13 @@ EXEMPLO DE USO NO NOTEBOOK:
 %run "../../00 - Common/Dev/base_utils"
 %run ./silver_utils
 
-config = create_manual_config("meu_catalog", "s3://meu-bucket")
-processor = SilverTableProcessor("TB_FATO_CARTAS", config)
+config = criar_config_manual("meu_catalog", "s3://meu-bucket")
+processador = SilverTableProcessor("TB_FATO_CARTAS", config)
 
-df_bronze = processor.extract_from_bronze("cards")
-df_silver = processor.transform_data(df_bronze, transform_function)
-processor.save_silver_table(df_silver, partition_cols=["ANO_INGESTAO", "MES_INGESTAO"],
-                             key_column="ID_CARTA", order_by_col="DT_INGESTAO")
+df_bronze = processador.extrair_da_bronze("cards")
+df_silver = processador.transformar_dados(df_bronze, funcao_transformacao)
+processador.salvar_tabela_silver(df_silver, colunas_particao=["ANO_INGESTAO", "MES_INGESTAO"],
+                                 coluna_chave="ID_CARTA", coluna_ordenacao="DT_INGESTAO")
 """
 
 import unicodedata
@@ -33,7 +33,7 @@ from delta.tables import DeltaTable
 
 # ============================================================================
 # INFRAESTRUTURA COMUM (Spark session, Unity Catalog, secrets)
-# get_spark_session / setup_unity_catalog / get_secret vêm de base_utils.py,
+# obter_sessao_spark / configurar_unity_catalog / obter_segredo vêm de base_utils.py,
 # carregado pelo notebook chamador. Sem %run aninhado aqui: o lint de
 # notebooks só resolve %run de um nível.
 #
@@ -41,14 +41,14 @@ from delta.tables import DeltaTable
 # %run'd, então buscamos no namespace do IPython. Fora do Databricks (pytest
 # local) get_ipython() é None e o bloco é ignorado.
 try:
-    get_spark_session, get_secret, setup_unity_catalog
+    obter_sessao_spark, obter_segredo, configurar_unity_catalog
 except NameError:
     try:
         import IPython
-        _user_ns = IPython.get_ipython().user_ns
-        get_spark_session = _user_ns["get_spark_session"]
-        get_secret = _user_ns["get_secret"]
-        setup_unity_catalog = _user_ns["setup_unity_catalog"]
+        _namespace_usuario = IPython.get_ipython().user_ns
+        obter_sessao_spark = _namespace_usuario["obter_sessao_spark"]
+        obter_segredo = _namespace_usuario["obter_segredo"]
+        configurar_unity_catalog = _namespace_usuario["configurar_unity_catalog"]
     except Exception:
         pass
 # ============================================================================
@@ -56,21 +56,21 @@ except NameError:
 # ============================================================================
 # FUNÇÕES DE CONFIGURAÇÃO
 # ============================================================================
-def create_manual_config(catalog_name, s3_bucket, s3_silver_prefix=None):
+def criar_config_manual(catalogo, bucket_s3, prefixo_s3_silver=None):
     """
     Monta a config da Silver a partir de catalog e bucket informados.
 
     Example:
-        config = create_manual_config("meu_catalog", "s3://meu-bucket")
-        processor = SilverTableProcessor("TB_FATO_CARTAS", config)
+        config = criar_config_manual("meu_catalog", "s3://meu-bucket")
+        processador = SilverTableProcessor("TB_FATO_CARTAS", config)
     """
     return {
-        'catalog_name': catalog_name,
+        'catalog_name': catalogo,
         'schema_bronze': "bronze",
         'schema_silver': "silver",
-        's3_bucket': s3_bucket,
-        # Argumento explicito vence; senao usa MTG_S3_SILVER_PREFIX via get_secret.
-        's3_silver_prefix': s3_silver_prefix or get_secret("s3_silver_prefix", "silver")
+        's3_bucket': bucket_s3,
+        # Argumento explicito vence; senao usa MTG_S3_SILVER_PREFIX via obter_segredo.
+        's3_silver_prefix': prefixo_s3_silver or obter_segredo("s3_silver_prefix", "silver")
     }
 
 # ============================================================================
@@ -102,14 +102,14 @@ def normalizar_valores(df, colunas):
 # ============================================================================
 # FUNÇÕES DE EXTRAÇÃO DA BRONZE
 # ============================================================================
-def extract_from_bronze(catalog, table_name_bronze):
+def extrair_da_bronze(catalogo, nome_tabela_bronze):
     """EXTRACT: lê dados da camada Bronze"""
-    spark_session = get_spark_session()
-    bronze_table = f"{catalog}.bronze.{table_name_bronze}"
+    sessao_spark = obter_sessao_spark()
+    tabela_bronze = f"{catalogo}.bronze.{nome_tabela_bronze}"
     # Sem try/except de propósito: erro de leitura (ex.: TABLE_OR_VIEW_NOT_FOUND)
     # deve derrubar a task Silver com a mensagem original.
-    df = spark_session.table(bronze_table)
-    print(f"Extraídos {df.count()} registros da Bronze: {bronze_table}")
+    df = sessao_spark.table(tabela_bronze)
+    print(f"Extraídos {df.count()} registros da Bronze: {tabela_bronze}")
     return df
 
 # ============================================================================
@@ -118,188 +118,188 @@ def extract_from_bronze(catalog, table_name_bronze):
 # Duplicada de propósito: função de um arquivo %run'd não é visível dentro de
 # outro arquivo %run'd (ver nota no topo), então não dá pra mover pra base_utils.
 # ============================================================================
-def _escape_sql_string(value):
+def _escapar_string_sql(valor):
     # Spark SQL não aceita '' como aspas literal; o escape é com backslash.
-    return value.replace("\\", "\\\\").replace("'", "\\'")
+    return valor.replace("\\", "\\\\").replace("'", "\\'")
 
 
-def apply_table_documentation(spark, full_table_name, table_comment=None, column_comments=None):
+def aplicar_documentacao_tabela(spark, nome_completo_tabela, comentario_tabela=None, comentarios_colunas=None):
     """Aplica COMMENT ON TABLE / ALTER COLUMN...COMMENT no Unity Catalog.
 
     Só metadado (não reescreve dado), então roda em toda execução. Colunas em
-    column_comments que não existem na tabela são ignoradas.
+    comentarios_colunas que não existem na tabela são ignoradas.
     """
-    if table_comment:
-        spark.sql(f"COMMENT ON TABLE {full_table_name} IS '{_escape_sql_string(table_comment)}'")
+    if comentario_tabela:
+        spark.sql(f"COMMENT ON TABLE {nome_completo_tabela} IS '{_escapar_string_sql(comentario_tabela)}'")
 
-    if column_comments:
-        existing_columns = {f.name for f in spark.table(full_table_name).schema.fields}
-        for column_name, comment in column_comments.items():
-            if column_name in existing_columns:
+    if comentarios_colunas:
+        colunas_existentes = {f.name for f in spark.table(nome_completo_tabela).schema.fields}
+        for nome_coluna, comentario in comentarios_colunas.items():
+            if nome_coluna in colunas_existentes:
                 spark.sql(
-                    f"ALTER TABLE {full_table_name} "
-                    f"ALTER COLUMN `{column_name}` COMMENT '{_escape_sql_string(comment)}'"
+                    f"ALTER TABLE {nome_completo_tabela} "
+                    f"ALTER COLUMN `{nome_coluna}` COMMENT '{_escapar_string_sql(comentario)}'"
                 )
 
 
-def _declare_primary_key(spark_session, full_table_name, table_name, key_cols):
-    """Declara a PRIMARY KEY de key_cols em full_table_name no Unity Catalog.
+def _declarar_chave_primaria(sessao_spark, nome_completo_tabela, nome_tabela, colunas_chave):
+    """Declara a PRIMARY KEY de colunas_chave em nome_completo_tabela no Unity Catalog.
 
     Unity Catalog exige NOT NULL na PK mas não garante unicidade, então um
     SELECT valida nulos e duplicatas antes e levanta RuntimeError com a contagem.
     DROP + ADD da constraint para ser idempotente entre execuções.
     """
-    pk_name = f"pk_{table_name.lower()}"
+    nome_pk = f"pk_{nome_tabela.lower()}"
 
-    null_sums = ", ".join(f"sum(case when `{k}` is null then 1 else 0 end) as `{k}`" for k in key_cols)
-    key_concat = "concat_ws('', " + ", ".join(f"cast(`{k}` as string)" for k in key_cols) + ")"
-    dup_count_expr = f"count(*) - count(distinct {key_concat}) as __dup_count"
-    row = spark_session.sql(
-        f"SELECT {null_sums}, {dup_count_expr} FROM {full_table_name}"
+    somas_nulos = ", ".join(f"sum(case when `{k}` is null then 1 else 0 end) as `{k}`" for k in colunas_chave)
+    concat_chave = "concat_ws('', " + ", ".join(f"cast(`{k}` as string)" for k in colunas_chave) + ")"
+    expr_qtd_duplicadas = f"count(*) - count(distinct {concat_chave}) as __dup_count"
+    linha = sessao_spark.sql(
+        f"SELECT {somas_nulos}, {expr_qtd_duplicadas} FROM {nome_completo_tabela}"
     ).collect()[0]
 
-    for k in key_cols:
-        null_count = row[k] or 0
-        if null_count > 0:
+    for k in colunas_chave:
+        qtd_nulos = linha[k] or 0
+        if qtd_nulos > 0:
             raise RuntimeError(
-                f"Coluna chave '{k}' de {full_table_name} tem {null_count} linha(s) "
+                f"Coluna chave '{k}' de {nome_completo_tabela} tem {qtd_nulos} linha(s) "
                 f"com valor NULO - viola a premissa de chave única desta tabela. "
                 f"Corrija a fonte/transformação antes de declarar PRIMARY KEY."
             )
 
-    dup_count = row["__dup_count"] or 0
-    if dup_count > 0:
+    qtd_duplicadas = linha["__dup_count"] or 0
+    if qtd_duplicadas > 0:
         raise RuntimeError(
-            f"Chave ({', '.join(key_cols)}) de {full_table_name} tem {dup_count} "
+            f"Chave ({', '.join(colunas_chave)}) de {nome_completo_tabela} tem {qtd_duplicadas} "
             f"linha(s) duplicada(s) - viola a premissa de chave única desta "
             f"tabela (Unity Catalog não enforca unicidade de PRIMARY KEY). "
             f"Corrija a fonte/transformação antes de declarar PRIMARY KEY."
         )
 
-    for k in key_cols:
-        spark_session.sql(f"ALTER TABLE {full_table_name} ALTER COLUMN `{k}` SET NOT NULL")
+    for k in colunas_chave:
+        sessao_spark.sql(f"ALTER TABLE {nome_completo_tabela} ALTER COLUMN `{k}` SET NOT NULL")
 
-    spark_session.sql(f"ALTER TABLE {full_table_name} DROP CONSTRAINT IF EXISTS {pk_name}")
-    spark_session.sql(
-        f"ALTER TABLE {full_table_name} ADD CONSTRAINT {pk_name} "
-        f"PRIMARY KEY ({', '.join(key_cols)})"
+    sessao_spark.sql(f"ALTER TABLE {nome_completo_tabela} DROP CONSTRAINT IF EXISTS {nome_pk}")
+    sessao_spark.sql(
+        f"ALTER TABLE {nome_completo_tabela} ADD CONSTRAINT {nome_pk} "
+        f"PRIMARY KEY ({', '.join(colunas_chave)})"
     )
 
 
 # ============================================================================
 # FUNÇÃO DE CARREGAMENTO DELTA/UNITY CATALOG
 # ============================================================================
-def save_to_silver(df_final, catalog, schema, table_name, s3_silver_path,
-                    partition_cols=None, key_column=None, order_by_col=None,
-                    table_comment=None, column_comments=None):
+def salvar_na_silver(df_final, catalogo, esquema, nome_tabela, caminho_s3_silver,
+                     colunas_particao=None, coluna_chave=None, coluna_ordenacao=None,
+                     comentario_tabela=None, comentarios_colunas=None):
     """
     LOAD: grava df_final na camada Silver (Delta + Unity Catalog).
 
     - Delta ainda não existe no caminho: cria os arquivos (primeira carga).
-    - Delta já existe e key_column informado: MERGE incremental via DeltaTable.merge (builder da API Python).
-    - Delta já existe e sem key_column: overwrite completo (uso explícito do chamador).
+    - Delta já existe e coluna_chave informado: MERGE incremental via DeltaTable.merge (builder da API Python).
+    - Delta já existe e sem coluna_chave: overwrite completo (uso explícito do chamador).
     - Em qualquer caso, garante o registro da tabela no Unity Catalog sem nunca
       sobrescrever dados já gravados (CREATE TABLE IF NOT EXISTS).
 
     Args:
         df_final (DataFrame): DataFrame final para salvar
-        catalog, schema, table_name (str): identificação da tabela no Unity Catalog
-        s3_silver_path (str): caminho/bucket S3 base para Silver (com ou sem "s3://")
-        partition_cols (list, optional): colunas para particionamento
-        key_column (str or list, optional): coluna(s) chave para merge incremental
-        order_by_col (str, optional): coluna de recência que decide qual linha
+        catalogo, esquema, nome_tabela (str): identificação da tabela no Unity Catalog
+        caminho_s3_silver (str): caminho/bucket S3 base para Silver (com ou sem "s3://")
+        colunas_particao (list, optional): colunas para particionamento
+        coluna_chave (str or list, optional): coluna(s) chave para merge incremental
+        coluna_ordenacao (str, optional): coluna de recência que decide qual linha
             fica quando o lote tem chave duplicada. Sem ela, usa dropDuplicates
             (linha arbitrária).
-        table_comment (str, optional): descrição de negócio da tabela (ver
+        comentario_tabela (str, optional): descrição de negócio da tabela (ver
             silver_column_docs.py). Recebe a nota de chave única ao final.
-        column_comments (dict, optional): {nome_coluna: descrição de negócio}
+        comentarios_colunas (dict, optional): {nome_coluna: descrição de negócio}
             (ver silver_column_docs.py).
     """
-    if not s3_silver_path.startswith("s3://"):
-        s3_silver_path = f"s3://{s3_silver_path}"
-    delta_path = f"{s3_silver_path}/{table_name}"
-    full_table_name = f"{catalog}.{schema}.{table_name}"
-    spark_session = get_spark_session()
+    if not caminho_s3_silver.startswith("s3://"):
+        caminho_s3_silver = f"s3://{caminho_s3_silver}"
+    caminho_delta = f"{caminho_s3_silver}/{nome_tabela}"
+    nome_completo_tabela = f"{catalogo}.{esquema}.{nome_tabela}"
+    sessao_spark = obter_sessao_spark()
 
-    spark_session.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}")
+    sessao_spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalogo}.{esquema}")
 
     # Dedup antes de tudo: a primeira carga grava sem MERGE, e uma duplicata
     # gravada ali nunca seria limpa pelos MERGEs seguintes.
-    if key_column:
-        key_cols = [key_column] if isinstance(key_column, str) else list(key_column)
+    if coluna_chave:
+        colunas_chave = [coluna_chave] if isinstance(coluna_chave, str) else list(coluna_chave)
 
-        if order_by_col and order_by_col in df_final.columns:
-            # nulls last: order_by_col nulo nunca vence um valor preenchido.
+        if coluna_ordenacao and coluna_ordenacao in df_final.columns:
+            # nulls last: coluna_ordenacao nulo nunca vence um valor preenchido.
             # Desempate por hash das demais colunas, para ser determinístico.
             # Limitação: colisão de hash é possível; se incomodar, desempatar
             # por uma coluna natural (ex.: de ingestão).
-            tie_break_cols = [c for c in df_final.columns if c not in key_cols and c != order_by_col]
-            order_cols = [col(order_by_col).desc_nulls_last()]
-            if tie_break_cols:
-                order_cols.append(hash(*tie_break_cols).desc())
-            window = Window.partitionBy(*key_cols).orderBy(*order_cols)
-            df_final = df_final.withColumn("_rn_dedup", row_number().over(window)) \
+            colunas_desempate = [c for c in df_final.columns if c not in colunas_chave and c != coluna_ordenacao]
+            colunas_ordem = [col(coluna_ordenacao).desc_nulls_last()]
+            if colunas_desempate:
+                colunas_ordem.append(hash(*colunas_desempate).desc())
+            janela = Window.partitionBy(*colunas_chave).orderBy(*colunas_ordem)
+            df_final = df_final.withColumn("_rn_dedup", row_number().over(janela)) \
                                 .filter(col("_rn_dedup") == 1).drop("_rn_dedup")
         else:
-            df_final = df_final.dropDuplicates(key_cols)
+            df_final = df_final.dropDuplicates(colunas_chave)
 
-    files_exist = DeltaTable.isDeltaTable(spark_session, delta_path)
+    arquivos_existem = DeltaTable.isDeltaTable(sessao_spark, caminho_delta)
 
-    if not files_exist:
-        print(f"Delta ainda não existe em {delta_path}. Criando (primeira carga).")
-        writer = df_final.write.format("delta").mode("overwrite")
-        if partition_cols:
-            writer = writer.partitionBy(*partition_cols)
-        writer.save(delta_path)
+    if not arquivos_existem:
+        print(f"Delta ainda não existe em {caminho_delta}. Criando (primeira carga).")
+        escritor = df_final.write.format("delta").mode("overwrite")
+        if colunas_particao:
+            escritor = escritor.partitionBy(*colunas_particao)
+        escritor.save(caminho_delta)
         print(f"Tabela criada com {df_final.count()} linhas.")
 
-    elif key_column:
-        key_cols = [key_column] if isinstance(key_column, str) else list(key_column)
+    elif coluna_chave:
+        colunas_chave = [coluna_chave] if isinstance(coluna_chave, str) else list(coluna_chave)
 
         # Só loga diferença de schema (metadado, sem scan). Coluna nova entra via
         # withSchemaEvolution(); remoção ou mudança de tipo pode falhar o MERGE.
-        current_cols = set(f.name for f in DeltaTable.forPath(spark_session, delta_path).toDF().schema.fields)
-        new_cols = set(df_final.columns)
-        if current_cols != new_cols:
-            print(f"Schema de {full_table_name} mudou: colunas removidas={sorted(current_cols - new_cols)}, "
-                  f"colunas novas={sorted(new_cols - current_cols)}.")
+        colunas_atuais = set(f.name for f in DeltaTable.forPath(sessao_spark, caminho_delta).toDF().schema.fields)
+        colunas_novas = set(df_final.columns)
+        if colunas_atuais != colunas_novas:
+            print(f"Schema de {nome_completo_tabela} mudou: colunas removidas={sorted(colunas_atuais - colunas_novas)}, "
+                  f"colunas novas={sorted(colunas_novas - colunas_atuais)}.")
 
         # <=> (null-safe): com =, chave nula nunca dá match e seria reinserida a cada run.
-        merge_condition = " AND ".join(f"silver.{k} <=> novo.{k}" for k in key_cols)
+        condicao_merge = " AND ".join(f"silver.{k} <=> novo.{k}" for k in colunas_chave)
 
         # withSchemaEvolution() exige Delta Lake 3.1+ (DBR 15.2+).
-        delta_table = DeltaTable.forPath(spark_session, delta_path)
+        tabela_delta = DeltaTable.forPath(sessao_spark, caminho_delta)
         (
-            delta_table.alias("silver")
-            .merge(df_final.alias("novo"), merge_condition)
+            tabela_delta.alias("silver")
+            .merge(df_final.alias("novo"), condicao_merge)
             .withSchemaEvolution()
             .whenMatchedUpdateAll()
             .whenNotMatchedInsertAll()
             .execute()
         )
 
-        print(f"Merge concluído em {full_table_name}.")
+        print(f"Merge concluído em {nome_completo_tabela}.")
 
     else:
-        print("Tabela Delta já existe mas sem key_column. Fazendo overwrite.")
-        df_final.write.format("delta").mode("overwrite").save(delta_path)
+        print("Tabela Delta já existe mas sem coluna_chave. Fazendo overwrite.")
+        df_final.write.format("delta").mode("overwrite").save(caminho_delta)
 
-    spark_session.sql(
-        f"CREATE TABLE IF NOT EXISTS {full_table_name} USING DELTA LOCATION '{delta_path}'"
+    sessao_spark.sql(
+        f"CREATE TABLE IF NOT EXISTS {nome_completo_tabela} USING DELTA LOCATION '{caminho_delta}'"
     )
 
     # Comentário da tabela = descrição de negócio + chave única, visível no catalog.
-    final_table_comment = table_comment
-    key_cols = None
-    if key_column:
-        key_cols = [key_column] if isinstance(key_column, str) else list(key_column)
-        key_note = f"Chave única: {', '.join(key_cols)}."
-        final_table_comment = f"{table_comment} {key_note}" if table_comment else key_note
+    comentario_final_tabela = comentario_tabela
+    colunas_chave = None
+    if coluna_chave:
+        colunas_chave = [coluna_chave] if isinstance(coluna_chave, str) else list(coluna_chave)
+        nota_chave = f"Chave única: {', '.join(colunas_chave)}."
+        comentario_final_tabela = f"{comentario_tabela} {nota_chave}" if comentario_tabela else nota_chave
 
-    apply_table_documentation(spark_session, full_table_name, final_table_comment, column_comments)
+    aplicar_documentacao_tabela(sessao_spark, nome_completo_tabela, comentario_final_tabela, comentarios_colunas)
 
-    if key_cols:
-        _declare_primary_key(spark_session, full_table_name, table_name, key_cols)
+    if colunas_chave:
+        _declarar_chave_primaria(sessao_spark, nome_completo_tabela, nome_tabela, colunas_chave)
 
     print("Dados salvos com sucesso na camada Silver!")
 
@@ -309,39 +309,39 @@ def save_to_silver(df_final, catalog, schema, table_name, s3_silver_path,
 class SilverTableProcessor:
     """Classe para processar tabelas Silver com padrões comuns"""
 
-    def __init__(self, table_name, config):
-        self.table_name = table_name
+    def __init__(self, nome_tabela, config):
+        self.nome_tabela = nome_tabela
         self.config = config
-        self.spark = get_spark_session()
-        self.s3_silver_path = f"{self.config['s3_bucket']}/{self.config['s3_silver_prefix']}"
+        self.spark = obter_sessao_spark()
+        self.caminho_s3_silver = f"{self.config['s3_bucket']}/{self.config['s3_silver_prefix']}"
 
-        setup_unity_catalog(self.config['catalog_name'], self.config['schema_silver'])
+        configurar_unity_catalog(self.config['catalog_name'], self.config['schema_silver'])
 
-    def extract_from_bronze(self, bronze_table_name):
+    def extrair_da_bronze(self, nome_tabela_bronze):
         """Extrai dados da Bronze"""
-        return extract_from_bronze(self.config['catalog_name'], bronze_table_name)
+        return extrair_da_bronze(self.config['catalog_name'], nome_tabela_bronze)
 
-    def transform_data(self, df, transform_function, **kwargs):
+    def transformar_dados(self, df, funcao_transformacao, **kwargs):
         """Aplica função de transformação personalizada (lógica em SQL, no notebook)"""
-        if transform_function:
-            return transform_function(df, **kwargs)
+        if funcao_transformacao:
+            return funcao_transformacao(df, **kwargs)
         return df
 
-    def save_silver_table(self, df, partition_cols=None, key_column=None, order_by_col=None,
-                           table_comment=None, column_comments=None):
+    def salvar_tabela_silver(self, df, colunas_particao=None, coluna_chave=None, coluna_ordenacao=None,
+                             comentario_tabela=None, comentarios_colunas=None):
         """Salva tabela na Silver com configurações padrão"""
-        save_to_silver(
+        salvar_na_silver(
             df_final=df,
-            catalog=self.config['catalog_name'],
-            schema=self.config['schema_silver'],
-            table_name=self.table_name,
-            s3_silver_path=self.s3_silver_path,
-            partition_cols=partition_cols,
-            key_column=key_column,
-            order_by_col=order_by_col,
-            table_comment=table_comment,
-            column_comments=column_comments
+            catalogo=self.config['catalog_name'],
+            esquema=self.config['schema_silver'],
+            nome_tabela=self.nome_tabela,
+            caminho_s3_silver=self.caminho_s3_silver,
+            colunas_particao=colunas_particao,
+            coluna_chave=coluna_chave,
+            coluna_ordenacao=coluna_ordenacao,
+            comentario_tabela=comentario_tabela,
+            comentarios_colunas=comentarios_colunas
         )
 
-        print(f"{self.table_name} criada com sucesso!")
-        print(f"Tabela criada: {self.config['catalog_name']}.{self.config['schema_silver']}.{self.table_name}")
+        print(f"{self.nome_tabela} criada com sucesso!")
+        print(f"Tabela criada: {self.config['catalog_name']}.{self.config['schema_silver']}.{self.nome_tabela}")

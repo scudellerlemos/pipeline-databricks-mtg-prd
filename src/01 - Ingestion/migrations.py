@@ -10,8 +10,8 @@
 from pyspark.sql.types import *
 
 # =============================================================================
-# FUNÇÕES COMPARTILHADAS (get_secret/setup_s3_storage/http_get_with_retry/
-# save_to_parquet/start_run/finish_run vivem em ingestion_utils.py)
+# FUNÇÕES COMPARTILHADAS (obter_segredo/configurar_armazenamento_s3/obter_http_com_retentativa/
+# salvar_em_parquet/iniciar_execucao/finalizar_execucao vivem em ingestion_utils.py)
 # =============================================================================
 
 # COMMAND ----------
@@ -26,20 +26,20 @@ from pyspark.sql.types import *
 
 # Sem filtro temporal: migrations é o histórico de merge/delete de scryfall_id,
 # e Bronze/Silver podem precisar resolver IDs antigos.
-SCRYFALL_API_URL = get_secret("scryfall_api_url")
-SCRYFALL_HEADERS = {"User-Agent": "MTGPipeline/1.0"}
-MAX_RETRIES = int(get_secret("max_retries", "3"))
+URL_API_SCRYFALL = obter_segredo("scryfall_api_url")
+CABECALHOS_SCRYFALL = {"User-Agent": "MTGPipeline/1.0"}
+MAX_TENTATIVAS = int(obter_segredo("max_retries", "3"))
 
 # Configurações do S3
-S3_BUCKET = get_secret("s3_bucket")
-S3_STAGE_PREFIX = get_secret("s3_stage_prefix", "stage")
-S3_BASE_PATH = f"s3://{S3_BUCKET}/{S3_STAGE_PREFIX}"
+BUCKET_S3 = obter_segredo("s3_bucket")
+PREFIXO_S3_STAGE = obter_segredo("s3_stage_prefix", "stage")
+CAMINHO_S3_STAGE = f"s3://{BUCKET_S3}/{PREFIXO_S3_STAGE}"
 
 # Log das configurações
 print("=" * 60)
 print("CONFIGURAÇÕES PARA INGESTÃO DE MIGRATIONS")
 print("=" * 60)
-print("S3_BASE_PATH: [CONFIGURADO]")
+print("CAMINHO_S3_STAGE: [CONFIGURADO]")
 print("=" * 60)
 
 # COMMAND ----------
@@ -48,7 +48,7 @@ print("=" * 60)
 # FUNÇÕES ESPECÍFICAS DE MIGRATIONS
 # =============================================================================
 
-MIGRATIONS_SCHEMA = StructType(
+ESQUEMA_MIGRACOES = StructType(
     [
         StructField("id", StringType(), True),
         StructField("uri", StringType(), True),
@@ -67,8 +67,8 @@ MIGRATIONS_SCHEMA = StructType(
     ]
 )
 
-def _to_migration_record(m):
-    metadata = m.get("metadata") or {}
+def _para_registro_migracao(m):
+    metadados = m.get("metadata") or {}
     return {
         "id": m.get("id"),
         "uri": m.get("uri"),
@@ -77,46 +77,46 @@ def _to_migration_record(m):
         "old_scryfall_id": m.get("old_scryfall_id"),
         "new_scryfall_id": m.get("new_scryfall_id"),
         "note": m.get("note"),
-        "metadata_id": metadata.get("id"),
-        "metadata_lang": metadata.get("lang"),
-        "metadata_name": metadata.get("name"),
-        "metadata_set_code": metadata.get("set_code"),
-        "metadata_oracle_id": metadata.get("oracle_id"),
-        "metadata_collector_number": metadata.get("collector_number"),
+        "metadata_id": metadados.get("id"),
+        "metadata_lang": metadados.get("lang"),
+        "metadata_name": metadados.get("name"),
+        "metadata_set_code": metadados.get("set_code"),
+        "metadata_oracle_id": metadados.get("oracle_id"),
+        "metadata_collector_number": metadados.get("collector_number"),
     }
 
-def fetch_all_migrations():
+def buscar_todas_migracoes():
     # Endpoint paginado: segue next_page até has_more=false.
-    records = []
-    url = f"{SCRYFALL_API_URL}/migrations"
+    registros = []
+    url = f"{URL_API_SCRYFALL}/migrations"
     while url:
-        resp = http_get_with_retry(url, headers=SCRYFALL_HEADERS, retries=MAX_RETRIES)
-        body = resp.json()
-        records.extend(_to_migration_record(m) for m in body["data"])
-        url = body.get("next_page") if body.get("has_more") else None
-    return records
+        resposta = obter_http_com_retentativa(url, cabecalhos=CABECALHOS_SCRYFALL, tentativas=MAX_TENTATIVAS)
+        corpo = resposta.json()
+        registros.extend(_para_registro_migracao(m) for m in corpo["data"])
+        url = corpo.get("next_page") if corpo.get("has_more") else None
+    return registros
 
-def ingest_migrations(run=None):
+def ingerir_migracoes(execucao=None):
     print("Iniciando ingestão simples: migrations")
 
-    table_data = fetch_all_migrations()
-    print(f"Migrations obtidas da Scryfall: {len(table_data)}")
+    dados_tabela = buscar_todas_migracoes()
+    print(f"Migrations obtidas da Scryfall: {len(dados_tabela)}")
 
-    df = save_to_parquet(
-        spark, table_data, "migrations", S3_BASE_PATH,
-        schema=MIGRATIONS_SCHEMA,
-        run=run,
+    df = salvar_em_parquet(
+        spark, dados_tabela, "migrations", CAMINHO_S3_STAGE,
+        esquema=ESQUEMA_MIGRACOES,
+        execucao=execucao,
     )
 
     if df is not None:
-        count = df.count()
-        print(f"migrations: {count} registros processados")
+        total = df.count()
+        print(f"migrations: {total} registros processados")
         display(df.limit(5))
     return df
 
 # Configurar S3 Storage
-setup_success = setup_s3_storage(S3_BASE_PATH)
-if not setup_success:
+sucesso_configuracao = configurar_armazenamento_s3(CAMINHO_S3_STAGE)
+if not sucesso_configuracao:
     raise Exception("Falha ao configurar S3 storage")
 
 print("Setup concluído com sucesso")
@@ -125,15 +125,15 @@ print("Setup concluído com sucesso")
 
 # Iniciar ingestão de migrations
 
-# Executa com controle de execução (ver run_stage_ingestion em ingestion_utils.py)
-migrations_df, run = run_stage_ingestion("migrations", "migrations", ingest_migrations, S3_BASE_PATH)
+# Executa com controle de execução (ver executar_ingestao_stage em ingestion_utils.py)
+df_migracoes, execucao = executar_ingestao_stage("migrations", "migrations", ingerir_migracoes, CAMINHO_S3_STAGE)
 
 # Gerar relatório
 print("=" * 50)
 print("RELATÓRIO DE INGESTÃO DE MIGRATIONS")
 print("=" * 50)
 
-if migrations_df is not None:
+if df_migracoes is not None:
     print("Arquivos salvos")
 
 else:

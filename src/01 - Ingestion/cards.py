@@ -13,8 +13,8 @@ from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, FloatType, BooleanType
 
 # =============================================================================
-# FUNÇÕES COMPARTILHADAS (get_secret/setup_s3_storage/save_to_parquet/
-# http_get_with_retry/start_run/finish_run vivem em ingestion_utils.py)
+# FUNÇÕES COMPARTILHADAS (obter_segredo/configurar_armazenamento_s3/salvar_em_parquet/
+# obter_http_com_retentativa/iniciar_execucao/finalizar_execucao vivem em ingestion_utils.py)
 # =============================================================================
 
 # COMMAND ----------
@@ -26,36 +26,36 @@ from pyspark.sql.types import StructType, StructField, StringType, IntegerType, 
 # =============================================================================
 # VARIÁVEIS DE CONFIGURAÇÃO
 # =============================================================================
-MAX_RETRIES = int(get_secret("max_retries", "3"))
+MAX_TENTATIVAS = int(obter_segredo("max_retries", "3"))
 
 # Baixa o catálogo inteiro da Scryfall (bulk data) e filtra em memória pelos
-# set_codes da janela temporal.
-SCRYFALL_API_URL = get_secret("scryfall_api_url")
-SCRYFALL_HEADERS = {"User-Agent": "MTGPipeline/1.0"}
+# codigos_colecoes da janela temporal.
+URL_API_SCRYFALL = obter_segredo("scryfall_api_url")
+CABECALHOS_SCRYFALL = {"User-Agent": "MTGPipeline/1.0"}
 # default_cards = 1 objeto por impressão (set/artist/number/imageUrl variam
 # por edição). Mesmo bulk de card_prices.py.
-SCRYFALL_BULK_TYPE = "default_cards"
+TIPO_BULK_SCRYFALL = "default_cards"
 
 # Configurações do S3
-S3_BUCKET = get_secret("s3_bucket")
-S3_STAGE_PREFIX = get_secret("s3_stage_prefix", "stage")
-S3_BASE_PATH = f"s3://{S3_BUCKET}/{S3_STAGE_PREFIX}"
+BUCKET_S3 = obter_segredo("s3_bucket")
+PREFIXO_S3_STAGE = obter_segredo("s3_stage_prefix", "stage")
+CAMINHO_S3_STAGE = f"s3://{BUCKET_S3}/{PREFIXO_S3_STAGE}"
 
-# Configurações de janela temporal (por coleção: só ingere sets lançados nos últimos YEARS_BACK anos)
-YEARS_BACK = int(get_secret("years_back", "5"))
-current_year = datetime.now().year
-cutoff_year = current_year - YEARS_BACK
-CUTOFF_DATE = datetime(cutoff_year, 1, 1)
-CUTOFF_DATE_STR = CUTOFF_DATE.strftime("%Y-%m-%d")
+# Configurações de janela temporal (por coleção: só ingere sets lançados nos últimos ANOS_RETROATIVOS anos)
+ANOS_RETROATIVOS = int(obter_segredo("years_back", "5"))
+ano_atual = datetime.now().year
+ano_corte = ano_atual - ANOS_RETROATIVOS
+DATA_CORTE = datetime(ano_corte, 1, 1)
+DATA_CORTE_TEXTO = DATA_CORTE.strftime("%Y-%m-%d")
 
-print(f"YEARS_BACK: {YEARS_BACK} | CUTOFF_DATE_STR: {CUTOFF_DATE_STR}")
+print(f"ANOS_RETROATIVOS: {ANOS_RETROATIVOS} | DATA_CORTE_TEXTO: {DATA_CORTE_TEXTO}")
 
 # COMMAND ----------
 
 # =============================================================================
 # FUNÇÕES ESPECÍFICAS DE CARDS
 # =============================================================================
-CARDS_SCHEMA = StructType([
+ESQUEMA_CARTAS = StructType([
     StructField("name", StringType(), True),
     StructField("manaCost", StringType(), True),
     StructField("cmc", FloatType(), True),
@@ -88,91 +88,91 @@ CARDS_SCHEMA = StructType([
 ])
 
 
-def _face_fallback(card, key):
+def _valor_da_face(carta, chave):
     # Cartas de dupla face (DFC) trazem alguns campos só em card_faces[0] (frente).
     # Usa `is not None` porque colors:[] na raiz é válido (incolor).
-    value = card.get(key)
-    if value is not None:
-        return value
-    faces = card.get("card_faces")
-    return faces[0].get(key) if faces else None
+    valor = carta.get(chave)
+    if valor is not None:
+        return valor
+    faces = carta.get("card_faces")
+    return faces[0].get(chave) if faces else None
 
 
-def _to_card_record(card):
+def _para_registro_carta(carta):
     # Dado bruto, sem regra de negócio. Listas/dicts viram JSON porque as
     # colunas são StringType.
-    image_uris = _face_fallback(card, "image_uris")
-    colors = _face_fallback(card, "colors")
-    color_identity = card.get("color_identity")
-    legalities = card.get("legalities")
+    uris_imagem = _valor_da_face(carta, "image_uris")
+    cores = _valor_da_face(carta, "colors")
+    identidade_cor = carta.get("color_identity")
+    legalidades = carta.get("legalities")
     return {
-        "name": card.get("name"),
-        "manaCost": _face_fallback(card, "mana_cost"),
-        "cmc": as_float(card.get("cmc")),
-        "colors": json.dumps(colors) if colors is not None else None,
-        "colorIdentity": json.dumps(color_identity) if color_identity is not None else None,
+        "name": carta.get("name"),
+        "manaCost": _valor_da_face(carta, "mana_cost"),
+        "cmc": como_float(carta.get("cmc")),
+        "colors": json.dumps(cores) if cores is not None else None,
+        "colorIdentity": json.dumps(identidade_cor) if identidade_cor is not None else None,
         # reversible_card não tem type_line na raiz, só nas faces
-        "type": _face_fallback(card, "type_line"),
+        "type": _valor_da_face(carta, "type_line"),
         # sem equivalente na Scryfall (campos legados da magicthegathering.io)
         "types": None,
         "subtypes": None,
-        "rarity": card.get("rarity"),
-        "set": card.get("set"),
-        "setName": card.get("set_name"),
-        "text": _face_fallback(card, "oracle_text"),
-        "artist": _face_fallback(card, "artist"),
-        "number": card.get("collector_number"),
-        "power": _face_fallback(card, "power"),
-        "toughness": _face_fallback(card, "toughness"),
-        "layout": card.get("layout"),
+        "rarity": carta.get("rarity"),
+        "set": carta.get("set"),
+        "setName": carta.get("set_name"),
+        "text": _valor_da_face(carta, "oracle_text"),
+        "artist": _valor_da_face(carta, "artist"),
+        "number": carta.get("collector_number"),
+        "power": _valor_da_face(carta, "power"),
+        "toughness": _valor_da_face(carta, "toughness"),
+        "layout": carta.get("layout"),
         # multiverse_ids (lista) da Scryfall nao e mapeado
         "multiverseid": None,
-        "imageUrl": image_uris.get("normal") if image_uris else None,
+        "imageUrl": uris_imagem.get("normal") if uris_imagem else None,
         "variations": None,
         "foreignNames": None,
         "printings": None,
         "originalText": None,
         "originalType": None,
-        "legalities": json.dumps(legalities) if legalities is not None else None,
-        "id": card.get("id"),
+        "legalities": json.dumps(legalidades) if legalidades is not None else None,
+        "id": carta.get("id"),
         # oracle_id fica na raiz, exceto em reversible_card, que só traz em card_faces.
-        "oracle_id": _face_fallback(card, "oracle_id"),
+        "oracle_id": _valor_da_face(carta, "oracle_id"),
     }
 
 
-def fetch_cards_by_sets(valid_set_codes):
+def buscar_cartas_por_colecoes(codigos_colecoes_validos):
     # 1 request pro índice do Bulk Data + 1 pro catálogo inteiro, filtrado em memória.
-    resp = http_get_with_retry(f"{SCRYFALL_API_URL}/bulk-data", headers=SCRYFALL_HEADERS, retries=MAX_RETRIES)
-    entry = next(e for e in resp.json()["data"] if e["type"] == SCRYFALL_BULK_TYPE)
+    resposta = obter_http_com_retentativa(f"{URL_API_SCRYFALL}/bulk-data", cabecalhos=CABECALHOS_SCRYFALL, tentativas=MAX_TENTATIVAS)
+    entrada = next(e for e in resposta.json()["data"] if e["type"] == TIPO_BULK_SCRYFALL)
 
-    raw = http_get_with_retry(entry["jsonl_download_uri"], headers=SCRYFALL_HEADERS, timeout=120, retries=MAX_RETRIES).content
-    # Os dois lados já vêm em minúsculas (set_codes e campo `set` da Scryfall).
-    valid_codes = set(valid_set_codes)
-    records = []
-    for line in gzip.decompress(raw).decode("utf-8").splitlines():
-        if not line.strip():
+    bruto = obter_http_com_retentativa(entrada["jsonl_download_uri"], cabecalhos=CABECALHOS_SCRYFALL, tempo_limite=120, tentativas=MAX_TENTATIVAS).content
+    # Os dois lados já vêm em minúsculas (codigos_colecoes e campo `set` da Scryfall).
+    codigos_validos = set(codigos_colecoes_validos)
+    registros = []
+    for linha in gzip.decompress(bruto).decode("utf-8").splitlines():
+        if not linha.strip():
             continue
-        card = json.loads(line)
-        if card.get("set") in valid_codes:
-            records.append(_to_card_record(card))
-    return records
+        carta = json.loads(linha)
+        if carta.get("set") in codigos_validos:
+            registros.append(_para_registro_carta(carta))
+    return registros
 
 
-def ingest_cards_by_collection(set_codes, table_name="cards", run=None):
-    print(f"Baixando catálogo Scryfall ({SCRYFALL_BULK_TYPE}) e filtrando por {len(set_codes)} coleções...")
+def ingerir_cartas_por_colecao(codigos_colecoes, nome_tabela="cards", execucao=None):
+    print(f"Baixando catálogo Scryfall ({TIPO_BULK_SCRYFALL}) e filtrando por {len(codigos_colecoes)} coleções...")
 
-    all_data = fetch_cards_by_sets(set_codes)
-    print(f"Cards encontrados nas coleções da janela temporal: {len(all_data)}")
+    dados_tabela = buscar_cartas_por_colecoes(codigos_colecoes)
+    print(f"Cards encontrados nas coleções da janela temporal: {len(dados_tabela)}")
 
-    if not all_data:
-        print(f"Nenhum dado válido para {table_name}")
+    if not dados_tabela:
+        print(f"Nenhum dado válido para {nome_tabela}")
         return None
 
-    df = save_to_parquet(spark, all_data, table_name, S3_BASE_PATH, schema=CARDS_SCHEMA, run=run)
+    df = salvar_em_parquet(spark, dados_tabela, nome_tabela, CAMINHO_S3_STAGE, esquema=ESQUEMA_CARTAS, execucao=execucao)
 
     if df is not None:
-        count = df.count()
-        print(f"{table_name}: {count} registros processados")
+        total = df.count()
+        print(f"{nome_tabela}: {total} registros processados")
         return df
     return None
 
@@ -197,21 +197,21 @@ except NameError:
         raise Exception("Spark não está disponível")
 
 # Configurar S3 Storage
-setup_success = setup_s3_storage(S3_BASE_PATH)
-if not setup_success:
+sucesso_configuracao = configurar_armazenamento_s3(CAMINHO_S3_STAGE)
+if not sucesso_configuracao:
     raise Exception("Falha ao configurar S3 storage")
 
 print("Setup concluído com sucesso")
 
-# Coleções (sets) lançadas dentro da janela de YEARS_BACK anos
-set_codes = get_scryfall_set_codes_since(SCRYFALL_API_URL, SCRYFALL_HEADERS, CUTOFF_DATE_STR, retries=MAX_RETRIES)
+# Coleções (sets) lançadas dentro da janela de ANOS_RETROATIVOS anos
+codigos_colecoes = obter_codigos_colecoes_scryfall_desde(URL_API_SCRYFALL, CABECALHOS_SCRYFALL, DATA_CORTE_TEXTO, tentativas=MAX_TENTATIVAS)
 
-# Executa com controle de execução (ver run_stage_ingestion em ingestion_utils.py)
-cards_df, run = run_stage_ingestion(
+# Executa com controle de execução (ver executar_ingestao_stage em ingestion_utils.py)
+df_cartas, execucao = executar_ingestao_stage(
     "cards", "bulk-data/default_cards",
-    lambda run: ingest_cards_by_collection(set_codes, table_name="cards", run=run),
-    S3_BASE_PATH,
-    params={"years_back": YEARS_BACK, "set_count": len(set_codes)},
+    lambda execucao: ingerir_cartas_por_colecao(codigos_colecoes, nome_tabela="cards", execucao=execucao),
+    CAMINHO_S3_STAGE,
+    parametros={"years_back": ANOS_RETROATIVOS, "set_count": len(codigos_colecoes)},
 )
 
 # Gerar relatório
@@ -219,10 +219,10 @@ print("=" * 50)
 print("RELATÓRIO DE INGESTÃO DE CARDS")
 print("=" * 50)
 
-if cards_df is not None:
+if df_cartas is not None:
     print("Arquivos salvos com sucesso")
-    print(f"Total de registros: {cards_df.count()}")
-    print(f"Coleções processadas: {len(set_codes)} (últimos {YEARS_BACK} anos)")
+    print(f"Total de registros: {df_cartas.count()}")
+    print(f"Coleções processadas: {len(codigos_colecoes)} (últimos {ANOS_RETROATIVOS} anos)")
     print("Particionamento: por ingestion_timestamp (ano/mês/dia da execução)")
 else:
     print("Falha na ingestão de cards")

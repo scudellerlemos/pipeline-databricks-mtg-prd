@@ -3,150 +3,150 @@
 # Databricks. Limitação: as funções abaixo são cópias - mudou lá, atualizar aqui.
 
 
-def normalize_path(path):
-    """Mirrors bronze_utils.normalize_path."""
-    path = path.split("://", 1)[-1]
-    if ".parquet/" in path:
-        path = path.split(".parquet/", 1)[0] + ".parquet"
-    return path
+def normalizar_caminho(caminho):
+    """Espelho de bronze_utils.normalizar_caminho."""
+    caminho = caminho.split("://", 1)[-1]
+    if ".parquet/" in caminho:
+        caminho = caminho.split(".parquet/", 1)[0] + ".parquet"
+    return caminho
 
 
-def list_stage_files_filter(names, contents=None):
-    """Mirrors list_stage_files' filter. contents maps a directory name to
-    what's inside it."""
-    contents = contents or {}
-    out = []
-    for n in names:
+def filtrar_arquivos_stage(nomes, conteudos=None):
+    """Espelho do filtro de listar_arquivos_stage. conteudos mapeia o nome de
+    um diretório para o que há dentro dele."""
+    conteudos = conteudos or {}
+    saida = []
+    for n in nomes:
         if not n.rstrip("/").endswith(".parquet"):
             continue
-        inner = contents.get(n)
-        if inner is not None and not any(i.endswith(".parquet") for i in inner):
+        internos = conteudos.get(n)
+        if internos is not None and not any(i.endswith(".parquet") for i in internos):
             continue
-        out.append(n)
-    return out
+        saida.append(n)
+    return saida
 
 
-def find_new_files(all_stage_files, already_loaded_files):
-    """Mirrors run_bronze_ingestion's idempotency filter."""
-    already = set(already_loaded_files)
-    return [f for f in all_stage_files if normalize_path(f) not in already]
+def encontrar_arquivos_novos(todos_arquivos_stage, arquivos_ja_carregados):
+    """Espelho do filtro de idempotência de executar_ingestao_bronze."""
+    ja_carregados = set(arquivos_ja_carregados)
+    return [f for f in todos_arquivos_stage if normalizar_caminho(f) not in ja_carregados]
 
 
-def diff_schema(existing_fields, incoming_fields):
-    """Mirrors log_schema_diff's classification: new/missing/type-changed."""
-    new_cols = sorted(c for c in incoming_fields if c not in existing_fields)
-    missing_cols = sorted(c for c in existing_fields if c not in incoming_fields)
-    type_changed = sorted(
-        c for c in incoming_fields
-        if c in existing_fields and incoming_fields[c] != existing_fields[c]
+def diferenca_esquema(campos_existentes, campos_entrada):
+    """Espelho da classificação de logar_diferenca_esquema: novas/ausentes/tipos divergentes."""
+    colunas_novas = sorted(c for c in campos_entrada if c not in campos_existentes)
+    colunas_ausentes = sorted(c for c in campos_existentes if c not in campos_entrada)
+    tipos_divergentes = sorted(
+        c for c in campos_entrada
+        if c in campos_existentes and campos_entrada[c] != campos_existentes[c]
     )
-    return {"new": new_cols, "missing": missing_cols, "type_changed": type_changed}
+    return {"novas": colunas_novas, "ausentes": colunas_ausentes, "tipos_divergentes": tipos_divergentes}
 
 
-def test_no_new_files_when_everything_already_loaded():
-    all_files = ["s3://b/stage/2026_09_14_cards.parquet"]
-    already = {"b/stage/2026_09_14_cards.parquet"}
-    assert find_new_files(all_files, already) == []
+def test_sem_arquivos_novos_quando_tudo_ja_carregado():
+    todos_arquivos = ["s3://b/stage/2026_09_14_cards.parquet"]
+    ja_carregados = {"b/stage/2026_09_14_cards.parquet"}
+    assert encontrar_arquivos_novos(todos_arquivos, ja_carregados) == []
 
 
-def test_only_unseen_files_are_new():
-    all_files = [
+def test_so_arquivos_nao_vistos_sao_novos():
+    todos_arquivos = [
         "s3://b/stage/2026_09_13_cards.parquet",
         "s3://b/stage/2026_09_14_cards.parquet",
     ]
-    already = {"b/stage/2026_09_13_cards.parquet"}
-    assert find_new_files(all_files, already) == ["s3://b/stage/2026_09_14_cards.parquet"]
+    ja_carregados = {"b/stage/2026_09_13_cards.parquet"}
+    assert encontrar_arquivos_novos(todos_arquivos, ja_carregados) == ["s3://b/stage/2026_09_14_cards.parquet"]
 
 
-def test_rerun_same_day_is_noop():
+def test_reexecucao_no_mesmo_dia_nao_faz_nada():
     # O nome do arquivo da Stage inclui o dia, então a 2a run do dia não gera arquivo novo.
-    all_files = ["s3://b/stage/2026_09_14_cards.parquet"]
-    already = {"b/stage/2026_09_14_cards.parquet"}
-    assert find_new_files(all_files, already) == []
+    todos_arquivos = ["s3://b/stage/2026_09_14_cards.parquet"]
+    ja_carregados = {"b/stage/2026_09_14_cards.parquet"}
+    assert encontrar_arquivos_novos(todos_arquivos, ja_carregados) == []
 
 
-def test_scheme_mismatch_does_not_cause_reprocessing():
+def test_esquema_de_uri_diferente_nao_reprocessa():
     # dbutils.fs.ls devolve s3:// e _metadata.file_path pode vir s3a:// pro mesmo arquivo.
-    all_files = ["s3://b/stage/2026_09_14_cards.parquet"]
-    already = {normalize_path("s3a://b/stage/2026_09_14_cards.parquet")}
-    assert find_new_files(all_files, already) == []
+    todos_arquivos = ["s3://b/stage/2026_09_14_cards.parquet"]
+    ja_carregados = {normalizar_caminho("s3a://b/stage/2026_09_14_cards.parquet")}
+    assert encontrar_arquivos_novos(todos_arquivos, ja_carregados) == []
 
 
-def test_schema_diff_detects_new_and_missing_columns():
-    existing = {"id": "StringType()", "name": "StringType()"}
-    incoming = {"id": "StringType()", "set": "StringType()"}
-    result = diff_schema(existing, incoming)
-    assert result["new"] == ["set"]
-    assert result["missing"] == ["name"]
-    assert result["type_changed"] == []
+def test_diferenca_esquema_detecta_colunas_novas_e_ausentes():
+    existentes = {"id": "StringType()", "name": "StringType()"}
+    entrada = {"id": "StringType()", "set": "StringType()"}
+    resultado = diferenca_esquema(existentes, entrada)
+    assert resultado["novas"] == ["set"]
+    assert resultado["ausentes"] == ["name"]
+    assert resultado["tipos_divergentes"] == []
 
 
-def test_schema_diff_detects_type_change():
-    existing = {"cmc": "DoubleType()"}
-    incoming = {"cmc": "StringType()"}
-    result = diff_schema(existing, incoming)
-    assert result["type_changed"] == ["cmc"]
+def test_diferenca_esquema_detecta_mudanca_de_tipo():
+    existentes = {"cmc": "DoubleType()"}
+    entrada = {"cmc": "StringType()"}
+    resultado = diferenca_esquema(existentes, entrada)
+    assert resultado["tipos_divergentes"] == ["cmc"]
 
 
-def test_schema_diff_first_load_is_all_new():
-    result = diff_schema({}, {"id": "StringType()", "name": "StringType()"})
-    assert result["new"] == ["id", "name"]
-    assert result["missing"] == []
+def test_diferenca_esquema_primeira_carga_tudo_novo():
+    resultado = diferenca_esquema({}, {"id": "StringType()", "name": "StringType()"})
+    assert resultado["novas"] == ["id", "name"]
+    assert resultado["ausentes"] == []
 
 
-def stage_table_path(s3_stage_path, stage_table_name):
-    """Mirrors list_stage_files' table_path: one subfolder per Stage table."""
-    return f"{s3_stage_path}/{stage_table_name}"
+def caminho_tabela_stage(caminho_s3_stage, nome_tabela_stage):
+    """Espelho do caminho_tabela de listar_arquivos_stage: uma subpasta por tabela da Stage."""
+    return f"{caminho_s3_stage}/{nome_tabela_stage}"
 
 
-def test_stage_table_path_is_per_table_subfolder():
-    assert stage_table_path("s3://b/stage", "cards") == "s3://b/stage/cards"
-    assert stage_table_path("s3://b/stage", "card_prices") == "s3://b/stage/card_prices"
+def test_caminho_tabela_stage_e_subpasta_por_tabela():
+    assert caminho_tabela_stage("s3://b/stage", "cards") == "s3://b/stage/cards"
+    assert caminho_tabela_stage("s3://b/stage", "card_prices") == "s3://b/stage/card_prices"
 
 
-def test_list_stage_files_filter_matches_directory_entries():
+def test_filtro_arquivos_stage_aceita_diretorios():
     # dbutils.fs.ls devolve diretório com "/" no final.
-    names = ["2026_09_15_cards.parquet/", "_SUCCESS", "2026_09_15_cards.parquet.crc"]
-    assert list_stage_files_filter(names) == ["2026_09_15_cards.parquet/"]
+    nomes = ["2026_09_15_cards.parquet/", "_SUCCESS", "2026_09_15_cards.parquet.crc"]
+    assert filtrar_arquivos_stage(nomes) == ["2026_09_15_cards.parquet/"]
 
 
-def test_uncommitted_write_directory_is_skipped():
+def test_diretorio_de_escrita_nao_commitada_e_ignorado():
     # Diretório só com o marcador _started_* é escrita não commitada; lê-lo
     # derruba a run com UNABLE_TO_INFER_SCHEMA.
-    names = ["ok.parquet/", "quebrado.parquet/"]
-    contents = {
+    nomes = ["ok.parquet/", "quebrado.parquet/"]
+    conteudos = {
         "ok.parquet/": ["part-00000-x.snappy.parquet", "_SUCCESS"],
         "quebrado.parquet/": ["_started_5021188249195991183"],
     }
-    assert list_stage_files_filter(names, contents) == ["ok.parquet/"]
+    assert filtrar_arquivos_stage(nomes, conteudos) == ["ok.parquet/"]
 
 
-def test_normalize_path_truncates_part_file_to_parquet_dir():
-    part_file = "s3://b/stage/cards/2026_09_15_cards.parquet/part-00000-x.snappy.parquet"
-    directory = "s3://b/stage/cards/2026_09_15_cards.parquet"
-    assert normalize_path(part_file) == normalize_path(directory)
+def test_normalizar_caminho_corta_arquivo_parte_no_diretorio_parquet():
+    arquivo_parte = "s3://b/stage/cards/2026_09_15_cards.parquet/part-00000-x.snappy.parquet"
+    diretorio = "s3://b/stage/cards/2026_09_15_cards.parquet"
+    assert normalizar_caminho(arquivo_parte) == normalizar_caminho(diretorio)
 
 
-def test_already_loaded_part_file_marks_directory_as_not_new():
+def test_arquivo_parte_ja_carregado_marca_diretorio_como_nao_novo():
     # Bronze guarda o part-file (s3a://), a Stage lista o diretório (s3://).
-    already_loaded = {normalize_path(
+    ja_carregados = {normalizar_caminho(
         "s3a://b/stage/cards/2026_09_15_cards.parquet/part-00000-x.snappy.parquet"
     )}
-    stage_files = ["s3://b/stage/cards/2026_09_15_cards.parquet"]
-    assert find_new_files(stage_files, already_loaded) == []
+    arquivos_stage = ["s3://b/stage/cards/2026_09_15_cards.parquet"]
+    assert encontrar_arquivos_novos(arquivos_stage, ja_carregados) == []
 
 
 if __name__ == "__main__":
-    test_no_new_files_when_everything_already_loaded()
-    test_only_unseen_files_are_new()
-    test_rerun_same_day_is_noop()
-    test_scheme_mismatch_does_not_cause_reprocessing()
-    test_schema_diff_detects_new_and_missing_columns()
-    test_schema_diff_detects_type_change()
-    test_schema_diff_first_load_is_all_new()
-    test_stage_table_path_is_per_table_subfolder()
-    test_list_stage_files_filter_matches_directory_entries()
-    test_uncommitted_write_directory_is_skipped()
-    test_normalize_path_truncates_part_file_to_parquet_dir()
-    test_already_loaded_part_file_marks_directory_as_not_new()
+    test_sem_arquivos_novos_quando_tudo_ja_carregado()
+    test_so_arquivos_nao_vistos_sao_novos()
+    test_reexecucao_no_mesmo_dia_nao_faz_nada()
+    test_esquema_de_uri_diferente_nao_reprocessa()
+    test_diferenca_esquema_detecta_colunas_novas_e_ausentes()
+    test_diferenca_esquema_detecta_mudanca_de_tipo()
+    test_diferenca_esquema_primeira_carga_tudo_novo()
+    test_caminho_tabela_stage_e_subpasta_por_tabela()
+    test_filtro_arquivos_stage_aceita_diretorios()
+    test_diretorio_de_escrita_nao_commitada_e_ignorado()
+    test_normalizar_caminho_corta_arquivo_parte_no_diretorio_parquet()
+    test_arquivo_parte_ja_carregado_marca_diretorio_como_nao_novo()
     print("OK")

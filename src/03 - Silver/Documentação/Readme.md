@@ -92,7 +92,7 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS 
 - **URL_**: URL
 - **DESC_**: Descrição/texto livre
 - **FLG_**: Flag booleano
-- **ANO_/MES_**: Colunas derivadas usadas só como `partition_cols`
+- **ANO_/MES_**: Colunas derivadas usadas só como `colunas_particao`
 
 ### Regra "sem `( ) { }` no dado Silver"
 Todo texto livre/estrutura serializada da fonte converte `{...}`/`(...)` para `[...]` na Silver, sem exceção por tabela - presença de parêntese/chave no dado Silver indica transformação incompleta.
@@ -115,7 +115,7 @@ Todo texto livre/estrutura serializada da fonte converte `{...}`/`(...)` para `[
 1. **Configuração**: Verifique segredos e configurações necessárias
 2. **Monitoramento**: Acompanhe logs e métricas de processamento
 3. **Manutenção**: Entenda estratégias de merge e atualização incremental
-4. **Documentação no Unity Catalog**: `COMMENT ON TABLE`/`ALTER COLUMN ... COMMENT` são aplicados automaticamente por todo notebook via `silver_utils.apply_table_documentation`, com o texto centralizado em `silver_column_docs.py`
+4. **Documentação no Unity Catalog**: `COMMENT ON TABLE`/`ALTER COLUMN ... COMMENT` são aplicados automaticamente por todo notebook via `silver_utils.aplicar_documentacao_tabela`, com o texto centralizado em `silver_column_docs.py`
 
 ## Controle de Qualidade
 

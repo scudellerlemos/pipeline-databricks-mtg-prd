@@ -10,7 +10,7 @@ import os
 import sys
 import yaml
 
-DAG_FILES = [
+ARQUIVOS_DAG = [
     (".github/DAGs/stage.yml", "MTG_STAGE"),
     (".github/DAGs/bronze.yml", "MTG_BRONZE"),
     (".github/DAGs/pipeline.yml", "MTG_PIPELINE"),
@@ -19,164 +19,164 @@ DAG_FILES = [
 ]
 
 
-def load_job(yaml_path, job_key):
-    with open(yaml_path, "r", encoding="utf-8") as f:
+def carregar_job(caminho_yaml, chave_job):
+    with open(caminho_yaml, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
     if "resources" not in config or "jobs" not in config["resources"]:
-        raise ValueError(f"{yaml_path}: resources.jobs nao encontrado")
-    if job_key not in config["resources"]["jobs"]:
-        raise ValueError(f"{yaml_path}: job {job_key} nao encontrado")
-    return config["resources"]["jobs"][job_key]
+        raise ValueError(f"{caminho_yaml}: resources.jobs nao encontrado")
+    if chave_job not in config["resources"]["jobs"]:
+        raise ValueError(f"{caminho_yaml}: job {chave_job} nao encontrado")
+    return config["resources"]["jobs"][chave_job]
 
 
-def validate_structure(yaml_path, job_key, job):
-    required_fields = ["name", "tasks"]
-    for field in required_fields:
-        if field not in job:
-            raise ValueError(f"{yaml_path} ({job_key}): campo obrigatorio ausente: {field}")
+def validar_estrutura(caminho_yaml, chave_job, job):
+    campos_obrigatorios = ["name", "tasks"]
+    for campo in campos_obrigatorios:
+        if campo not in job:
+            raise ValueError(f"{caminho_yaml} ({chave_job}): campo obrigatorio ausente: {campo}")
 
     if not job["tasks"]:
-        raise ValueError(f"{yaml_path} ({job_key}): nenhuma task definida")
+        raise ValueError(f"{caminho_yaml} ({chave_job}): nenhuma task definida")
 
-    task_keys = [task["task_key"] for task in job["tasks"]]
-    for task in job["tasks"]:
-        for dep in task.get("depends_on", []):
-            if dep["task_key"] not in task_keys:
+    chaves_tarefas = [tarefa["task_key"] for tarefa in job["tasks"]]
+    for tarefa in job["tasks"]:
+        for dependencia in tarefa.get("depends_on", []):
+            if dependencia["task_key"] not in chaves_tarefas:
                 raise ValueError(
-                    f"{yaml_path} ({job_key}): task {task['task_key']} depende de "
-                    f"task inexistente: {dep['task_key']}"
+                    f"{caminho_yaml} ({chave_job}): task {tarefa['task_key']} depende de "
+                    f"task inexistente: {dependencia['task_key']}"
                 )
 
 
-def has_notebook_tasks(job):
-    return any("notebook_task" in task for task in job["tasks"])
+def tem_tarefas_notebook(job):
+    return any("notebook_task" in tarefa for tarefa in job["tasks"])
 
 
-def resolve_notebook_file(notebook_path):
-    if notebook_path.endswith(".ipynb"):
-        notebook_path = notebook_path[:-6]
-    if os.path.exists(f"{notebook_path}.py"):
-        return f"{notebook_path}.py"
-    return f"{notebook_path}.ipynb"
+def resolver_arquivo_notebook(caminho_notebook):
+    if caminho_notebook.endswith(".ipynb"):
+        caminho_notebook = caminho_notebook[:-6]
+    if os.path.exists(f"{caminho_notebook}.py"):
+        return f"{caminho_notebook}.py"
+    return f"{caminho_notebook}.ipynb"
 
 
-def validate_notebook_paths(yaml_path, job_key, job):
-    missing = []
-    for task in job["tasks"]:
-        if "notebook_task" not in task:
+def validar_caminhos_notebooks(caminho_yaml, chave_job, job):
+    ausentes = []
+    for tarefa in job["tasks"]:
+        if "notebook_task" not in tarefa:
             continue
-        notebook_path = task["notebook_task"]["notebook_path"]
-        if notebook_path.endswith(".ipynb"):
-            notebook_path = notebook_path[:-6]
-        if not (os.path.exists(f"{notebook_path}.ipynb") or os.path.exists(f"{notebook_path}.py")):
-            missing.append(f"{notebook_path}.ipynb")
-    if missing:
-        raise ValueError(f"{yaml_path} ({job_key}): notebooks ausentes: {missing}")
+        caminho_notebook = tarefa["notebook_task"]["notebook_path"]
+        if caminho_notebook.endswith(".ipynb"):
+            caminho_notebook = caminho_notebook[:-6]
+        if not (os.path.exists(f"{caminho_notebook}.ipynb") or os.path.exists(f"{caminho_notebook}.py")):
+            ausentes.append(f"{caminho_notebook}.ipynb")
+    if ausentes:
+        raise ValueError(f"{caminho_yaml} ({chave_job}): notebooks ausentes: {ausentes}")
 
 
-def validate_notebook_syntax(yaml_path, job_key, job):
-    invalid = []
-    for task in job["tasks"]:
-        if "notebook_task" not in task:
+def validar_sintaxe_notebooks(caminho_yaml, chave_job, job):
+    invalidos = []
+    for tarefa in job["tasks"]:
+        if "notebook_task" not in tarefa:
             continue
-        notebook_path = task["notebook_task"]["notebook_path"]
-        notebook_file = resolve_notebook_file(notebook_path)
-        if notebook_file.endswith(".py"):
+        caminho_notebook = tarefa["notebook_task"]["notebook_path"]
+        arquivo_notebook = resolver_arquivo_notebook(caminho_notebook)
+        if arquivo_notebook.endswith(".py"):
             try:
-                with open(notebook_file, "r", encoding="utf-8") as f:
-                    first_line = f.readline().strip()
-                if first_line != "# Databricks notebook source":
-                    invalid.append(f"{notebook_file} - sem header 'Databricks notebook source'")
+                with open(arquivo_notebook, "r", encoding="utf-8") as f:
+                    primeira_linha = f.readline().strip()
+                if primeira_linha != "# Databricks notebook source":
+                    invalidos.append(f"{arquivo_notebook} - sem header 'Databricks notebook source'")
             except Exception as e:
-                invalid.append(f"{notebook_file} - {e}")
+                invalidos.append(f"{arquivo_notebook} - {e}")
             continue
         try:
-            with open(notebook_file, "r", encoding="utf-8") as f:
-                notebook_data = json.load(f)
-            if "cells" not in notebook_data:
-                invalid.append(f"{notebook_file} - sem cells")
+            with open(arquivo_notebook, "r", encoding="utf-8") as f:
+                dados_notebook = json.load(f)
+            if "cells" not in dados_notebook:
+                invalidos.append(f"{arquivo_notebook} - sem cells")
                 continue
-            code_cells = [c for c in notebook_data["cells"] if c.get("cell_type") == "code"]
-            if not code_cells:
-                invalid.append(f"{notebook_file} - sem code cells")
+            celulas_codigo = [c for c in dados_notebook["cells"] if c.get("cell_type") == "code"]
+            if not celulas_codigo:
+                invalidos.append(f"{arquivo_notebook} - sem code cells")
         except json.JSONDecodeError:
-            invalid.append(f"{notebook_file} - JSON invalido")
+            invalidos.append(f"{arquivo_notebook} - JSON invalido")
         except Exception as e:
-            invalid.append(f"{notebook_file} - {e}")
-    if invalid:
-        raise ValueError(f"{yaml_path} ({job_key}): notebooks invalidos: {invalid}")
+            invalidos.append(f"{arquivo_notebook} - {e}")
+    if invalidos:
+        raise ValueError(f"{caminho_yaml} ({chave_job}): notebooks invalidos: {invalidos}")
 
 
-def validate_cluster_config(yaml_path, job_key, job):
-    if not has_notebook_tasks(job):
+def validar_config_cluster(caminho_yaml, chave_job, job):
+    if not tem_tarefas_notebook(job):
         return  # job so-orquestrador (run_job_task) nao roda notebook, nao precisa de cluster
     if "job_clusters" not in job:
-        raise ValueError(f"{yaml_path} ({job_key}): job_clusters ausente")
+        raise ValueError(f"{caminho_yaml} ({chave_job}): job_clusters ausente")
     for cluster in job["job_clusters"]:
         if "new_cluster" not in cluster:
-            raise ValueError(f"{yaml_path} ({job_key}): cluster sem new_cluster")
-        cluster_config = cluster["new_cluster"]
-        if "spark_version" not in cluster_config:
-            raise ValueError(f"{yaml_path} ({job_key}): campo de cluster ausente: spark_version")
+            raise ValueError(f"{caminho_yaml} ({chave_job}): cluster sem new_cluster")
+        config_cluster = cluster["new_cluster"]
+        if "spark_version" not in config_cluster:
+            raise ValueError(f"{caminho_yaml} ({chave_job}): campo de cluster ausente: spark_version")
         # node de compute vem de node_type_id direto OU de um instance pool
-        if "node_type_id" not in cluster_config and "instance_pool_id" not in cluster_config:
+        if "node_type_id" not in config_cluster and "instance_pool_id" not in config_cluster:
             raise ValueError(
-                f"{yaml_path} ({job_key}): cluster sem node_type_id nem instance_pool_id"
+                f"{caminho_yaml} ({chave_job}): cluster sem node_type_id nem instance_pool_id"
             )
 
 
-def validate_git_config(yaml_path, job_key, job):
-    if not has_notebook_tasks(job):
+def validar_config_git(caminho_yaml, chave_job, job):
+    if not tem_tarefas_notebook(job):
         return  # job so-orquestrador nao le notebook via git_source
     if "git_source" not in job:
-        raise ValueError(f"{yaml_path} ({job_key}): git_source ausente")
-    for field in ["git_url", "git_provider", "git_branch"]:
-        if field not in job["git_source"]:
-            raise ValueError(f"{yaml_path} ({job_key}): campo git ausente: {field}")
+        raise ValueError(f"{caminho_yaml} ({chave_job}): git_source ausente")
+    for campo in ["git_url", "git_provider", "git_branch"]:
+        if campo not in job["git_source"]:
+            raise ValueError(f"{caminho_yaml} ({chave_job}): campo git ausente: {campo}")
 
 
-CHECKS = [
-    validate_structure,
-    validate_notebook_paths,
-    validate_notebook_syntax,
-    validate_cluster_config,
-    validate_git_config,
+VALIDACOES = [
+    validar_estrutura,
+    validar_caminhos_notebooks,
+    validar_sintaxe_notebooks,
+    validar_config_cluster,
+    validar_config_git,
 ]
 
 
 def main():
-    errors = []
-    report = []
+    erros = []
+    relatorio = []
 
-    for yaml_path, job_key in DAG_FILES:
+    for caminho_yaml, chave_job in ARQUIVOS_DAG:
         try:
-            job = load_job(yaml_path, job_key)
+            job = carregar_job(caminho_yaml, chave_job)
         except ValueError as e:
-            errors.append(str(e))
+            erros.append(str(e))
             continue
 
-        for check in CHECKS:
+        for validacao in VALIDACOES:
             try:
-                check(yaml_path, job_key, job)
+                validacao(caminho_yaml, chave_job, job)
             except ValueError as e:
-                errors.append(str(e))
+                erros.append(str(e))
 
-        deps = [
-            f"{task['task_key']} -> {[d['task_key'] for d in task['depends_on']]}"
-            for task in job["tasks"]
-            if "depends_on" in task
+        dependencias = [
+            f"{tarefa['task_key']} -> {[d['task_key'] for d in tarefa['depends_on']]}"
+            for tarefa in job["tasks"]
+            if "depends_on" in tarefa
         ]
-        report.append(f"{job_key} ({yaml_path}): {len(job['tasks'])} tasks; " + "; ".join(deps))
+        relatorio.append(f"{chave_job} ({caminho_yaml}): {len(job['tasks'])} tasks; " + "; ".join(dependencias))
 
-    if errors:
+    if erros:
         print("Falhas de validacao:")
-        for e in errors:
+        for e in erros:
             print(f"  - {e}")
         sys.exit(1)
 
     print("Todos os jobs em .github/DAGs/*.yml sao validos.")
-    for line in report:
-        print(f"  - {line}")
+    for linha in relatorio:
+        print(f"  - {linha}")
 
 
 if __name__ == "__main__":

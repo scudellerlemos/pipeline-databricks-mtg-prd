@@ -58,7 +58,7 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS 
 | DT_INGESTAO_BRONZE | timestamp | Timestamp em que a Bronze processou o registro. | Não |
 
 ## 7. Chave Única
-`COD_COLECAO`. Coluna NOT NULL por natureza (todo set tem código) - `silver_utils.save_to_silver` valida isso antes de declarar a constraint (1 `SELECT` que soma as linhas nulas da(s) coluna(s) de chave) e só então aplica `ALTER COLUMN ... SET NOT NULL` + `PRIMARY KEY` de verdade no Unity Catalog; se algum dia houver linha com `COD_COLECAO` nulo: na primeira carga (antes de a PK existir) a run falha com erro explícito (contagem exata) logo após a gravação - as linhas já gravadas permanecem na tabela - em vez de a tabela ficar sem PK silenciosamente; nas execuções seguintes a coluna já é NOT NULL, então o próprio MERGE é rejeitado pelo Delta (violação de NOT NULL) e nada é gravado. `COMMENT ON TABLE` é sempre gravado, independente da PK.
+`COD_COLECAO`. Coluna NOT NULL por natureza (todo set tem código) - `silver_utils.salvar_na_silver` valida isso antes de declarar a constraint (1 `SELECT` que soma as linhas nulas da(s) coluna(s) de chave) e só então aplica `ALTER COLUMN ... SET NOT NULL` + `PRIMARY KEY` de verdade no Unity Catalog; se algum dia houver linha com `COD_COLECAO` nulo: na primeira carga (antes de a PK existir) a run falha com erro explícito (contagem exata) logo após a gravação - as linhas já gravadas permanecem na tabela - em vez de a tabela ficar sem PK silenciosamente; nas execuções seguintes a coluna já é NOT NULL, então o próprio MERGE é rejeitado pelo Delta (violação de NOT NULL) e nada é gravado. `COMMENT ON TABLE` é sempre gravado, independente da PK.
 
 ## 8. Regras de Implementação
 - **Filtro temporal:** nenhum na Silver; a Stage (`sets.py`) já restringe a coleções com `releaseDate` >= 1º de janeiro de (ano atual − `years_back`, padrão 5) - não é o histórico completo.
@@ -70,7 +70,7 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS 
 | Data | Responsável | Alteração |
 |---|---|---|
 | 2025-01-18 | Felipe | Criação inicial (`TB_REF_SILVER_SETS`) |
-| 2026-09-15 | Felipe | #115/#116: renomeada para TB_DIM_COLECOES (DAMA - Dimensão), colunas 100% PT-BR/recasadas, adicionado Estágio 0 de renomeação a partir da Bronze real (SELECT anterior nunca resolvia contra a Bronze crua), corrigido `extract_from_bronze` para o nome real da tabela ("sets"), sinalização de chave única na tabela |
+| 2026-09-15 | Felipe | #115/#116: renomeada para TB_DIM_COLECOES (DAMA - Dimensão), colunas 100% PT-BR/recasadas, adicionado Estágio 0 de renomeação a partir da Bronze real (SELECT anterior nunca resolvia contra a Bronze crua), corrigido `extrair_da_bronze` para o nome real da tabela ("sets"), sinalização de chave única na tabela |
 
 ## 10. Observações
 - Pipeline exibe logs detalhados de transformações aplicadas.

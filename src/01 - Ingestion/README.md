@@ -57,7 +57,7 @@ e decide o que gravar via idempotência de arquivo (abaixo), não via delta da A
 
 | Notebook | Fonte | Grão | Observação |
 |---|---|---|---|
-| `cards.py` | `bulk-data/default_cards` | 1 linha por impressão (set+número) | Filtra por `set_codes` dentro da janela `years_back` (via `sets`) |
+| `cards.py` | `bulk-data/default_cards` | 1 linha por impressão (set+número) | Filtra por `codigos_colecoes` dentro da janela `years_back` (via `sets`) |
 | `sets.py` | `GET /sets` | 1 linha por coleção | Filtra por `releaseDate >= cutoff` |
 | `card_prices.py` | `bulk-data/default_cards` | 1 linha por impressão (`id`) | Filtra por `releaseDate >= cutoff`, independente de `cards.py` |
 | `symbology.py` | `GET /symbology` | 1 linha por símbolo | Catálogo estático, sem filtro temporal |
@@ -74,11 +74,11 @@ aguentar o pico das 6 tasks em paralelo (com 1 worker fixo, as 6 juntas dão OOM
 `years_back`, e o join com `cards` é 1:1 por `id` e fica pra Gold.
 
 `ingestion_utils.py` concentra o que é comum aos notebooks (`%run ./ingestion_utils`):
-`get_secret`, `setup_s3_storage`, `http_get_with_retry`, `save_to_parquet`,
-`get_scryfall_set_codes_since`, `start_run`/`finish_run`, `run_stage_ingestion`
-(padroniza o wrapper `start_run` → `try`/ingest → `finish_run` repetido nos 6
-notebooks — cada um só chama `run_stage_ingestion(table_name, endpoint,
-ingest_fn, S3_BASE_PATH)` e monta seu próprio relatório com o DataFrame
+`obter_segredo`, `configurar_armazenamento_s3`, `obter_http_com_retentativa`, `salvar_em_parquet`,
+`obter_codigos_colecoes_scryfall_desde`, `iniciar_execucao`/`finalizar_execucao`, `executar_ingestao_stage`
+(padroniza o wrapper `iniciar_execucao` → `try`/ingest → `finalizar_execucao` repetido nos 6
+notebooks — cada um só chama `executar_ingestao_stage(nome_tabela, endpoint,
+funcao_ingestao, CAMINHO_S3_STAGE)` e monta seu próprio relatório com o DataFrame
 devolvido).
 
 ## Documentação de negócio (o que é cada tabela/coluna)
@@ -147,13 +147,13 @@ s3://{bucket}/{stage_prefix}/
 
 - **Nome de arquivo determinístico** — se o arquivo já existe, a run
   pula essa partição (`files_skipped`) em vez de sobrescrever. Os seis notebooks
-  usam o mesmo esquema via `save_to_parquet()` (`parquet_file_name()`).
+  usam o mesmo esquema via `salvar_em_parquet()` (`nome_arquivo_parquet()`).
   `{YYYYMMDD}` é a data completa da execução; `{year}_{month}` é a partição -
   a data da execução, exceto em `sets` e `card_prices`, onde vem do
   `releaseDate`. Com a data completa no nome, runs em meses diferentes nunca
   colidem. Arquivos antigos, só com o dia no nome, continuam válidos: a Bronze
   controla por caminho.
-- **`start_run()`/`finish_run()`** (`ingestion_utils.py`): o `start_run` monta o registro em memória e o `finish_run` grava um JSON por execução em
+- **`iniciar_execucao()`/`finalizar_execucao()`** (`ingestion_utils.py`): o `iniciar_execucao` monta o registro em memória e o `finalizar_execucao` grava um JSON por execução em
   `_control/{table}/{run_id}.json` com: `run_id`, `endpoint`, `params`, início/fim,
   duração, `files_written`/`files_skipped`/`records_written`, `status`
   (`SUCCESS`/`FAILED`) e `error`. É observabilidade — se o próprio
@@ -164,7 +164,7 @@ s3://{bucket}/{stage_prefix}/
 
 ## Erros e retry
 
-`http_get_with_retry()` cobre todo request HTTP dos seis notebooks: retry com backoff
+`obter_http_com_retentativa()` cobre todo request HTTP dos seis notebooks: retry com backoff
 em 429 e 5xx, timeout/erro de conexão também tenta de novo; 4xx (exceto 429) falha
 direto, sem retry (erro do cliente não muda tentando de novo).
 

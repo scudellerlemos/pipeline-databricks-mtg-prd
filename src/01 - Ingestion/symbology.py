@@ -10,8 +10,8 @@ import json
 from pyspark.sql.types import *
 
 # =============================================================================
-# FUNÇÕES COMPARTILHADAS (get_secret/setup_s3_storage/http_get_with_retry/
-# save_to_parquet/start_run/finish_run vivem em ingestion_utils.py)
+# FUNÇÕES COMPARTILHADAS (obter_segredo/configurar_armazenamento_s3/obter_http_com_retentativa/
+# salvar_em_parquet/iniciar_execucao/finalizar_execucao vivem em ingestion_utils.py)
 # =============================================================================
 
 # COMMAND ----------
@@ -26,20 +26,20 @@ from pyspark.sql.types import *
 
 # Catálogo de símbolos (mana, tap, etc.) sem data de alteração, então sem
 # filtro temporal: 1 arquivo por dia.
-SCRYFALL_API_URL = get_secret("scryfall_api_url")
-SCRYFALL_HEADERS = {"User-Agent": "MTGPipeline/1.0"}
-MAX_RETRIES = int(get_secret("max_retries", "3"))
+URL_API_SCRYFALL = obter_segredo("scryfall_api_url")
+CABECALHOS_SCRYFALL = {"User-Agent": "MTGPipeline/1.0"}
+MAX_TENTATIVAS = int(obter_segredo("max_retries", "3"))
 
 # Configurações do S3
-S3_BUCKET = get_secret("s3_bucket")
-S3_STAGE_PREFIX = get_secret("s3_stage_prefix", "stage")
-S3_BASE_PATH = f"s3://{S3_BUCKET}/{S3_STAGE_PREFIX}"
+BUCKET_S3 = obter_segredo("s3_bucket")
+PREFIXO_S3_STAGE = obter_segredo("s3_stage_prefix", "stage")
+CAMINHO_S3_STAGE = f"s3://{BUCKET_S3}/{PREFIXO_S3_STAGE}"
 
 # Log das configurações
 print("=" * 60)
 print("CONFIGURAÇÕES PARA INGESTÃO DE SYMBOLOGY")
 print("=" * 60)
-print("S3_BASE_PATH: [CONFIGURADO]")
+print("CAMINHO_S3_STAGE: [CONFIGURADO]")
 print("=" * 60)
 
 # COMMAND ----------
@@ -48,7 +48,7 @@ print("=" * 60)
 # FUNÇÕES ESPECÍFICAS DE SYMBOLOGY
 # =============================================================================
 
-SYMBOLOGY_SCHEMA = StructType(
+ESQUEMA_SIMBOLOS = StructType(
     [
         StructField("symbol", StringType(), True),
         StructField("svg_uri", StringType(), True),
@@ -67,7 +67,7 @@ SYMBOLOGY_SCHEMA = StructType(
     ]
 )
 
-def _to_symbol_record(s):
+def _para_registro_simbolo(s):
     return {
         "symbol": s.get("symbol"),
         "svg_uri": s.get("svg_uri"),
@@ -76,48 +76,48 @@ def _to_symbol_record(s):
         "transposable": s.get("transposable"),
         "represents_mana": s.get("represents_mana"),
         "appears_in_mana_costs": s.get("appears_in_mana_costs"),
-        "mana_value": as_float(s.get("mana_value")),
+        "mana_value": como_float(s.get("mana_value")),
         "hybrid": s.get("hybrid"),
         "phyrexian": s.get("phyrexian"),
-        "cmc": as_float(s.get("cmc")),
+        "cmc": como_float(s.get("cmc")),
         "funny": s.get("funny"),
         # Listas viram JSON (coluna StringType); null continua None.
         "colors": json.dumps(s.get("colors")) if s.get("colors") is not None else None,
         "gatherer_alternates": json.dumps(s.get("gatherer_alternates")) if s.get("gatherer_alternates") is not None else None,
     }
 
-def fetch_all_symbols():
+def buscar_todos_simbolos():
     # /symbology devolve tudo em 1 request hoje; segue next_page caso passe a paginar.
-    records = []
-    url = f"{SCRYFALL_API_URL}/symbology"
+    registros = []
+    url = f"{URL_API_SCRYFALL}/symbology"
     while url:
-        resp = http_get_with_retry(url, headers=SCRYFALL_HEADERS, retries=MAX_RETRIES)
-        body = resp.json()
-        records.extend(_to_symbol_record(s) for s in body["data"])
-        url = body.get("next_page") if body.get("has_more") else None
-    return records
+        resposta = obter_http_com_retentativa(url, cabecalhos=CABECALHOS_SCRYFALL, tentativas=MAX_TENTATIVAS)
+        corpo = resposta.json()
+        registros.extend(_para_registro_simbolo(s) for s in corpo["data"])
+        url = corpo.get("next_page") if corpo.get("has_more") else None
+    return registros
 
-def ingest_symbology(run=None):
+def ingerir_simbolos(execucao=None):
     print("Iniciando ingestão simples: symbology")
 
-    table_data = fetch_all_symbols()
-    print(f"Símbolos obtidos da Scryfall: {len(table_data)}")
+    dados_tabela = buscar_todos_simbolos()
+    print(f"Símbolos obtidos da Scryfall: {len(dados_tabela)}")
 
-    df = save_to_parquet(
-        spark, table_data, "symbology", S3_BASE_PATH,
-        schema=SYMBOLOGY_SCHEMA,
-        run=run,
+    df = salvar_em_parquet(
+        spark, dados_tabela, "symbology", CAMINHO_S3_STAGE,
+        esquema=ESQUEMA_SIMBOLOS,
+        execucao=execucao,
     )
 
     if df is not None:
-        count = df.count()
-        print(f"symbology: {count} registros processados")
+        total = df.count()
+        print(f"symbology: {total} registros processados")
         display(df.limit(5))
     return df
 
 # Configurar S3 Storage
-setup_success = setup_s3_storage(S3_BASE_PATH)
-if not setup_success:
+sucesso_configuracao = configurar_armazenamento_s3(CAMINHO_S3_STAGE)
+if not sucesso_configuracao:
     raise Exception("Falha ao configurar S3 storage")
 
 print("Setup concluído com sucesso")
@@ -126,15 +126,15 @@ print("Setup concluído com sucesso")
 
 # Iniciar ingestão de symbology
 
-# Executa com controle de execução (ver run_stage_ingestion em ingestion_utils.py)
-symbology_df, run = run_stage_ingestion("symbology", "symbology", ingest_symbology, S3_BASE_PATH)
+# Executa com controle de execução (ver executar_ingestao_stage em ingestion_utils.py)
+df_simbolos, execucao = executar_ingestao_stage("symbology", "symbology", ingerir_simbolos, CAMINHO_S3_STAGE)
 
 # Gerar relatório
 print("=" * 50)
 print("RELATÓRIO DE INGESTÃO DE SYMBOLOGY")
 print("=" * 50)
 
-if symbology_df is not None:
+if df_simbolos is not None:
     print("Arquivos salvos")
 
 else:

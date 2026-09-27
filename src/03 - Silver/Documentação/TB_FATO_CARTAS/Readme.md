@@ -74,7 +74,7 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS 
 | MES_INGESTAO | int | Mês derivado de DT_INGESTAO (partição física). | Não |
 
 ## 7. Chave Única
-`ID_CARTA`. Coluna NOT NULL por natureza (toda impressão tem id) - a constraint `PRIMARY KEY` no Unity Catalog é aplicada com sucesso (ver `silver_utils.save_to_silver`), além do `COMMENT ON TABLE` sempre gravado.
+`ID_CARTA`. Coluna NOT NULL por natureza (toda impressão tem id) - a constraint `PRIMARY KEY` no Unity Catalog é aplicada com sucesso (ver `silver_utils.salvar_na_silver`), além do `COMMENT ON TABLE` sempre gravado.
 
 ## 8. Regras de Implementação
 - **Filtro temporal:** últimos 60 meses de `DT_INGESTAO` (CTE `_renomeado`).

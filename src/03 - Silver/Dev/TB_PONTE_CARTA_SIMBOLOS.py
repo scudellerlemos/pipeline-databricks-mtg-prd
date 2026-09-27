@@ -42,7 +42,7 @@ import logging
 # =============================================================================
 # CONFIGURACAO INICIAL
 # =============================================================================
-def setup_logging():
+def configurar_logging():
     """Configura logging para o script"""
     logging.basicConfig(
         level=logging.INFO,
@@ -51,7 +51,7 @@ def setup_logging():
     return logging.getLogger(__name__)
 
 
-def transform_ponte_carta_simbolos(df_cartas, df_simbolos):
+def transformar_ponte_carta_simbolos(df_cartas, df_simbolos):
     """
     Explode DESC_CUSTO_MANA (já limpo, notação [X][Y]...) em 1 linha por
     símbolo via regexp_extract_all + posexplode.
@@ -87,27 +87,27 @@ def transform_ponte_carta_simbolos(df_cartas, df_simbolos):
 # =============================================================================
 # CONFIGURACAO
 # =============================================================================
-config = create_manual_config(get_secret("catalog_name"), get_secret("s3_bucket"))
-setup_unity_catalog(config['catalog_name'], config['schema_silver'])
+config = criar_config_manual(obter_segredo("catalog_name"), obter_segredo("s3_bucket"))
+configurar_unity_catalog(config['catalog_name'], config['schema_silver'])
 
 # COMMAND ----------
 
 # =============================================================================
 # PROCESSAMENTO USANDO SILVER_UTILS
 # =============================================================================
-processor = SilverTableProcessor("TB_PONTE_CARTA_SIMBOLOS", config)
+processador = SilverTableProcessor("TB_PONTE_CARTA_SIMBOLOS", config)
 
-# Fonte é a própria Silver, então lê via spark.table e não extract_from_bronze.
+# Fonte é a própria Silver, então lê via spark.table e não extrair_da_bronze.
 df_cartas = spark.table(f"{config['catalog_name']}.{config['schema_silver']}.TB_FATO_CARTAS")
 df_simbolos = spark.table(f"{config['catalog_name']}.{config['schema_silver']}.TB_DOM_SIMBOLOS")
 
-df_silver = transform_ponte_carta_simbolos(df_cartas, df_simbolos)
+df_silver = transformar_ponte_carta_simbolos(df_cartas, df_simbolos)
 
-processor.save_silver_table(
+processador.salvar_tabela_silver(
     df_silver,
-    key_column=["ID_CARTA", "NUM_ORDEM_SIMBOLO"],
-    table_comment=get_table_comment("TB_PONTE_CARTA_SIMBOLOS"),
-    column_comments=get_column_comments("TB_PONTE_CARTA_SIMBOLOS")
+    coluna_chave=["ID_CARTA", "NUM_ORDEM_SIMBOLO"],
+    comentario_tabela=obter_comentario_tabela("TB_PONTE_CARTA_SIMBOLOS"),
+    comentarios_colunas=obter_comentarios_colunas("TB_PONTE_CARTA_SIMBOLOS")
 )
 
 # =============================================================================

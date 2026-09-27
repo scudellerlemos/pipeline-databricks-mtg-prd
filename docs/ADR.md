@@ -126,7 +126,7 @@ Em dev, fora o alerta, nenhuma dessas env vars é definida: vale o YAML (`PAUSED
 `git_branch: main`) e o secret scope `mtg-pipeline` (catálogo `mtg_dev` como
 default, bucket `.../dev`). Só prd sobrescreve.
 
-`get_secret()` resolve na ordem env var > secret > default, e a trava
+`obter_segredo()` resolve na ordem env var > secret > default, e a trava
 `_barra_catalogo_de_dev_em_producao` (`src/00 - Common/Dev/base_utils.py`)
 explode se um job de produção resolver o catálogo para `mtg_dev`.
 

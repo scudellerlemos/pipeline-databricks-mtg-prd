@@ -4,12 +4,12 @@
 # ============================================================================
 """
 Comentários de tabela e coluna da Gold, aplicados no Unity Catalog por
-gold_utils.save_to_gold (mesmo padrão de silver_column_docs.py).
+gold_utils.salvar_na_gold (mesmo padrão de silver_column_docs.py).
 
 Descrições voltadas para quem consome o dado (analista, BI, Genie).
 """
 
-GOLD_TABLES = {
+TABELAS_GOLD = {
     "TB_FATO_MERCADO_CARTAS": {
         "comment": "Visão única de mercado de cartas de Magic: The Gathering - combina o catálogo de cartas, a coleção de origem, o histórico de cotação de preço e o volume de esclarecimentos oficiais de regras. Uma linha por cotação de preço de uma impressão de carta. Feita para responder 'quanto vale essa carta, em que coleção ela está e o quanto ela é discutida em termos de regras', sem precisar conhecer Bronze/Silver.",
         "columns": {
@@ -43,18 +43,18 @@ GOLD_TABLES = {
 }
 
 
-def get_table_comment(gold_table_name):
-    return GOLD_TABLES.get(gold_table_name, {}).get("comment")
+def obter_comentario_tabela(nome_tabela_gold):
+    return TABELAS_GOLD.get(nome_tabela_gold, {}).get("comment")
 
 
-def get_column_comments(gold_table_name):
-    return GOLD_TABLES.get(gold_table_name, {}).get("columns", {})
+def obter_comentarios_colunas(nome_tabela_gold):
+    return TABELAS_GOLD.get(nome_tabela_gold, {}).get("columns", {})
 
 
 if __name__ == "__main__":
-    for table_name in GOLD_TABLES:
-        assert get_table_comment(table_name), f"{table_name} sem comment de tabela"
-        assert get_column_comments(table_name), f"{table_name} sem comments de coluna"
-    assert get_table_comment("inexistente") is None
-    assert get_column_comments("inexistente") == {}
+    for nome_tabela in TABELAS_GOLD:
+        assert obter_comentario_tabela(nome_tabela), f"{nome_tabela} sem comment de tabela"
+        assert obter_comentarios_colunas(nome_tabela), f"{nome_tabela} sem comments de coluna"
+    assert obter_comentario_tabela("inexistente") is None
+    assert obter_comentarios_colunas("inexistente") == {}
     print("gold_column_docs: OK")

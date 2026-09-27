@@ -4,15 +4,15 @@
 # ============================================================================
 """
 Comentários de tabela e coluna da Bronze, aplicados no Unity Catalog por
-run_bronze_ingestion. Importar com %run ./bronze_column_docs no notebook.
+executar_ingestao_bronze. Importar com %run ./bronze_column_docs no notebook.
 
 Os READMEs de Documentação/ repetem este texto à mão: ao mudar uma
 descrição, atualizar os dois.
 """
 
 # Colunas técnicas comuns a toda tabela Bronze. Uma tabela sobrescreve uma
-# entrada declarando a mesma chave em BRONZE_TABLES[tabela]["columns"].
-COMMON_COLUMNS = {
+# entrada declarando a mesma chave em TABELAS_BRONZE[tabela]["columns"].
+COLUNAS_COMUNS = {
     "ingestion_timestamp": "Início da execução da Stage que gravou o registro (mesmo valor em todas as linhas da run) - distinto do bronze_ingestion_timestamp.",
     "source": "Nome da fonte de dados de origem (ex.: 'scryfall').",
     "endpoint": "Nome da tabela/endpoint lógico gravado pela Stage (= nome da tabela, ex.: 'cards'), não a URL da API.",
@@ -21,7 +21,7 @@ COMMON_COLUMNS = {
     "bronze_ingestion_timestamp": "Timestamp em que a Bronze processou o registro.",
 }
 
-BRONZE_TABLES = {
+TABELAS_BRONZE = {
     "cards": {
         "comment": "Catálogo de cartas de Magic: The Gathering - uma linha por impressão/edição de carta. Responde 'o que é essa carta': texto de regras, custo de mana, tipo, raridade, artista, em qual set saiu e em quais formatos de jogo (Standard, Commander, etc.) ela é legal. Base pra qualquer análise de deck, coleção ou busca de carta.",
         "columns": {
@@ -122,7 +122,7 @@ BRONZE_TABLES = {
         "comment": "Esclarecimentos oficiais de regras (rulings) publicados pela Wizards/Scryfall pra cartas específicas, ligados por oracle_id. Serve pra responder dúvida de interação entre cartas ou interpretação de regra que o texto da carta sozinho não deixa claro - uma carta pode acumular várias rulings ao longo do tempo.",
         "columns": {
             "oracle_id": "Oracle id da carta a que esta ruling se aplica (mesmo valor para todas as impressões da carta).",
-            # Sobrescreve COMMON_COLUMNS["source"]: aqui é o emissor da ruling.
+            # Sobrescreve COLUNAS_COMUNS["source"]: aqui é o emissor da ruling.
             "source": "Quem emitiu a ruling ('wotc' ou 'scryfall') - não é a fonte de linhagem. Partições gravadas antes da correção têm sempre 'scryfall' (a Stage sobrescrevia a coluna).",
             "published_at": "Data de publicação da ruling.",
             "comment": "Texto da ruling / esclarecimento de regras.",
@@ -149,24 +149,24 @@ BRONZE_TABLES = {
 }
 
 
-def get_table_comment(bronze_table_name):
-    return BRONZE_TABLES.get(bronze_table_name, {}).get("comment")
+def obter_comentario_tabela(nome_tabela_bronze):
+    return TABELAS_BRONZE.get(nome_tabela_bronze, {}).get("comment")
 
 
-def get_column_comments(bronze_table_name):
-    """COMMON_COLUMNS + colunas específicas da tabela (específica vence em conflito de chave)."""
-    table_columns = BRONZE_TABLES.get(bronze_table_name, {}).get("columns", {})
-    return {**COMMON_COLUMNS, **table_columns}
+def obter_comentarios_colunas(nome_tabela_bronze):
+    """COLUNAS_COMUNS + colunas específicas da tabela (específica vence em conflito de chave)."""
+    colunas_tabela = TABELAS_BRONZE.get(nome_tabela_bronze, {}).get("columns", {})
+    return {**COLUNAS_COMUNS, **colunas_tabela}
 
 
 if __name__ == "__main__":
-    for table_name in BRONZE_TABLES:
-        assert get_table_comment(table_name), f"{table_name} sem comment de tabela"
-    rulings_comments = get_column_comments("rulings")
-    assert rulings_comments["source"] != COMMON_COLUMNS["source"], \
-        "rulings.source deveria sobrescrever o COMMON_COLUMNS genérico"
-    cards_comments = get_column_comments("cards")
-    assert cards_comments["source"] == COMMON_COLUMNS["source"], \
-        "cards.source não deveria ter override - devia vir do COMMON_COLUMNS"
-    assert cards_comments["name"] == BRONZE_TABLES["cards"]["columns"]["name"]
+    for nome_tabela in TABELAS_BRONZE:
+        assert obter_comentario_tabela(nome_tabela), f"{nome_tabela} sem comment de tabela"
+    comentarios_esclarecimentos = obter_comentarios_colunas("rulings")
+    assert comentarios_esclarecimentos["source"] != COLUNAS_COMUNS["source"], \
+        "rulings.source deveria sobrescrever o COLUNAS_COMUNS genérico"
+    comentarios_cartas = obter_comentarios_colunas("cards")
+    assert comentarios_cartas["source"] == COLUNAS_COMUNS["source"], \
+        "cards.source não deveria ter override - devia vir do COLUNAS_COMUNS"
+    assert comentarios_cartas["name"] == TABELAS_BRONZE["cards"]["columns"]["name"]
     print("bronze_column_docs: OK")

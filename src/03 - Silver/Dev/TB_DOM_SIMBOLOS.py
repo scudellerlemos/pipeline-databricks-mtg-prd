@@ -43,7 +43,7 @@ import logging
 # =============================================================================
 # CONFIGURACAO INICIAL
 # =============================================================================
-def setup_logging():
+def configurar_logging():
     """Configura logging para o script"""
     logging.basicConfig(
         level=logging.INFO,
@@ -51,7 +51,7 @@ def setup_logging():
     )
     return logging.getLogger(__name__)
 
-def transform_symbology_silver(df):
+def transformar_simbolos_silver(df):
     """
     Transformacao especifica para tabela Simbolos de Mana, via SQL
     (spark.sql sobre temp views).
@@ -100,27 +100,27 @@ def transform_symbology_silver(df):
 # CONFIGURACAO
 # =============================================================================
 
-config = create_manual_config(get_secret("catalog_name"), get_secret("s3_bucket"))
+config = criar_config_manual(obter_segredo("catalog_name"), obter_segredo("s3_bucket"))
 
-setup_unity_catalog(config['catalog_name'], config['schema_silver'])
+configurar_unity_catalog(config['catalog_name'], config['schema_silver'])
 
 # COMMAND ----------
 
 # =============================================================================
 # PROCESSAMENTO USANDO SILVER_UTILS
 # =============================================================================
-processor = SilverTableProcessor("TB_DOM_SIMBOLOS", config)
+processador = SilverTableProcessor("TB_DOM_SIMBOLOS", config)
 
-df_bronze = processor.extract_from_bronze("symbology")
+df_bronze = processador.extrair_da_bronze("symbology")
 
-df_silver = processor.transform_data(df_bronze, transform_symbology_silver)
+df_silver = processador.transformar_dados(df_bronze, transformar_simbolos_silver)
 
-processor.save_silver_table(
+processador.salvar_tabela_silver(
     df_silver,
-    key_column="COD_SIMBOLO",
-    order_by_col="DT_INGESTAO",
-    table_comment=get_table_comment("TB_DOM_SIMBOLOS"),
-    column_comments=get_column_comments("TB_DOM_SIMBOLOS")
+    coluna_chave="COD_SIMBOLO",
+    coluna_ordenacao="DT_INGESTAO",
+    comentario_tabela=obter_comentario_tabela("TB_DOM_SIMBOLOS"),
+    comentarios_colunas=obter_comentarios_colunas("TB_DOM_SIMBOLOS")
 )
 
 # =============================================================================

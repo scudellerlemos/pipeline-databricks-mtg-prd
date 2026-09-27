@@ -11,8 +11,8 @@ import json
 from pyspark.sql.types import StructType, StructField, StringType
 
 # =============================================================================
-# FUNÇÕES COMPARTILHADAS (get_secret/setup_s3_storage/save_to_parquet/
-# http_get_with_retry/start_run/finish_run vivem em ingestion_utils.py)
+# FUNÇÕES COMPARTILHADAS (obter_segredo/configurar_armazenamento_s3/salvar_em_parquet/
+# obter_http_com_retentativa/iniciar_execucao/finalizar_execucao vivem em ingestion_utils.py)
 # =============================================================================
 
 # COMMAND ----------
@@ -24,14 +24,14 @@ from pyspark.sql.types import StructType, StructField, StringType
 # =============================================================================
 # VARIÁVEIS DE CONFIGURAÇÃO
 # =============================================================================
-S3_BUCKET = get_secret("s3_bucket")
-S3_STAGE_PREFIX = get_secret("s3_stage_prefix", "stage")
-S3_BASE_PATH = f"s3://{S3_BUCKET}/{S3_STAGE_PREFIX}"
-SCRYFALL_API_URL = get_secret("scryfall_api_url")
-SCRYFALL_HEADERS = {"User-Agent": "MTGPipeline/1.0"}
-MAX_RETRIES = int(get_secret("max_retries", "3"))
+BUCKET_S3 = obter_segredo("s3_bucket")
+PREFIXO_S3_STAGE = obter_segredo("s3_stage_prefix", "stage")
+CAMINHO_S3_STAGE = f"s3://{BUCKET_S3}/{PREFIXO_S3_STAGE}"
+URL_API_SCRYFALL = obter_segredo("scryfall_api_url")
+CABECALHOS_SCRYFALL = {"User-Agent": "MTGPipeline/1.0"}
+MAX_TENTATIVAS = int(obter_segredo("max_retries", "3"))
 # rulings = 1 objeto por ruling, ligado à carta por oracle_id (não por impressão).
-SCRYFALL_BULK_TYPE = "rulings"
+TIPO_BULK_SCRYFALL = "rulings"
 
 # Sem filtro years_back: ruling antiga continua válida, e o catálogo é pequeno
 # (~79k linhas, ~5MB comprimido).
@@ -42,7 +42,7 @@ print("Sem filtro temporal - captura o catálogo de rulings inteiro")
 # =============================================================================
 # FUNÇÕES ESPECÍFICAS DE RULINGS
 # =============================================================================
-RULINGS_SCHEMA = StructType([
+ESQUEMA_ESCLARECIMENTOS = StructType([
     StructField("oracle_id", StringType(), True),
     StructField("source", StringType(), True),
     StructField("published_at", StringType(), True),
@@ -50,49 +50,49 @@ RULINGS_SCHEMA = StructType([
 ])
 
 
-def _to_ruling_record(ruling):
+def _para_registro_esclarecimento(esclarecimento):
     # Grava como a Scryfall devolve; o join com cards (1 oracle_id -> N
     # impressões) fica na Gold.
     return {
-        "oracle_id": ruling.get("oracle_id"),
-        "source": ruling.get("source"),
-        "published_at": ruling.get("published_at"),
-        "comment": ruling.get("comment"),
+        "oracle_id": esclarecimento.get("oracle_id"),
+        "source": esclarecimento.get("source"),
+        "published_at": esclarecimento.get("published_at"),
+        "comment": esclarecimento.get("comment"),
     }
 
 
-def fetch_ruling_records():
+def buscar_registros_esclarecimentos():
     # 1 request pro índice do Bulk Data + 1 pro catálogo inteiro.
-    resp = http_get_with_retry(f"{SCRYFALL_API_URL}/bulk-data", headers=SCRYFALL_HEADERS, retries=MAX_RETRIES)
-    entry = next(e for e in resp.json()["data"] if e["type"] == SCRYFALL_BULK_TYPE)
+    resposta = obter_http_com_retentativa(f"{URL_API_SCRYFALL}/bulk-data", cabecalhos=CABECALHOS_SCRYFALL, tentativas=MAX_TENTATIVAS)
+    entrada = next(e for e in resposta.json()["data"] if e["type"] == TIPO_BULK_SCRYFALL)
 
-    raw = http_get_with_retry(entry["jsonl_download_uri"], headers=SCRYFALL_HEADERS, timeout=120, retries=MAX_RETRIES).content
+    bruto = obter_http_com_retentativa(entrada["jsonl_download_uri"], cabecalhos=CABECALHOS_SCRYFALL, tempo_limite=120, tentativas=MAX_TENTATIVAS).content
     return [
-        _to_ruling_record(json.loads(line))
-        for line in gzip.decompress(raw).decode("utf-8").splitlines()
-        if line.strip()
+        _para_registro_esclarecimento(json.loads(linha))
+        for linha in gzip.decompress(bruto).decode("utf-8").splitlines()
+        if linha.strip()
     ]
 
 
-def ingest_rulings(table_name="rulings", run=None):
+def ingerir_esclarecimentos(nome_tabela="rulings", execucao=None):
     print("Baixando catálogo de rulings Scryfall...")
 
-    all_data = fetch_ruling_records()
-    print(f"Rulings obtidas do catálogo: {len(all_data)}")
+    dados_tabela = buscar_registros_esclarecimentos()
+    print(f"Rulings obtidas do catálogo: {len(dados_tabela)}")
 
-    if not all_data:
-        print(f"Nenhum dado válido para {table_name}")
+    if not dados_tabela:
+        print(f"Nenhum dado válido para {nome_tabela}")
         return None
 
-    df = save_to_parquet(
-        spark, all_data, table_name, S3_BASE_PATH,
-        schema=RULINGS_SCHEMA,
-        run=run,
+    df = salvar_em_parquet(
+        spark, dados_tabela, nome_tabela, CAMINHO_S3_STAGE,
+        esquema=ESQUEMA_ESCLARECIMENTOS,
+        execucao=execucao,
     )
 
     if df is not None:
-        count = df.count()
-        print(f"{table_name}: {count} registros processados")
+        total = df.count()
+        print(f"{nome_tabela}: {total} registros processados")
         return df
     return None
 
@@ -103,17 +103,17 @@ def ingest_rulings(table_name="rulings", run=None):
 # =============================================================================
 
 # Configurar S3 Storage
-setup_success = setup_s3_storage(S3_BASE_PATH)
-if not setup_success:
+sucesso_configuracao = configurar_armazenamento_s3(CAMINHO_S3_STAGE)
+if not sucesso_configuracao:
     raise Exception("Falha ao configurar S3 storage")
 
 print("Setup concluído com sucesso")
 
-# Executa com controle de execução (ver run_stage_ingestion em ingestion_utils.py)
-rulings_df, run = run_stage_ingestion(
+# Executa com controle de execução (ver executar_ingestao_stage em ingestion_utils.py)
+df_esclarecimentos, execucao = executar_ingestao_stage(
     "rulings", "bulk-data/rulings",
-    lambda run: ingest_rulings(table_name="rulings", run=run),
-    S3_BASE_PATH,
+    lambda execucao: ingerir_esclarecimentos(nome_tabela="rulings", execucao=execucao),
+    CAMINHO_S3_STAGE,
 )
 
 # Gerar relatório
@@ -121,7 +121,7 @@ print("=" * 50)
 print("RELATÓRIO DE INGESTÃO DE RULINGS")
 print("=" * 50)
 
-if rulings_df is not None:
+if df_esclarecimentos is not None:
     print("Arquivos salvos")
 else:
     print("Falha na ingestão de rulings")

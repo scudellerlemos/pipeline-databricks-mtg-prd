@@ -5,50 +5,50 @@ import json
 import os
 import sys
 
-_NB_PATH = os.path.join(os.path.dirname(__file__), "symbology.py")
-_MARKER = "FUNÇÕES ESPECÍFICAS DE SYMBOLOGY"
+_CAMINHO_NOTEBOOK = os.path.join(os.path.dirname(__file__), "symbology.py")
+_MARCADOR = "FUNÇÕES ESPECÍFICAS DE SYMBOLOGY"
 
-def _load_functions(fake_get):
-    cells = open(_NB_PATH, encoding="utf-8").read().split("# COMMAND ----------")
-    cell_source = next(c for c in cells if _MARKER in c)
+def _carregar_funcoes(requisicao_falsa):
+    celulas = open(_CAMINHO_NOTEBOOK, encoding="utf-8").read().split("# COMMAND ----------")
+    codigo_celula = next(c for c in celulas if _MARCADOR in c)
 
-    ns = {
+    escopo = {
         "json": json,
         # no notebook vem do %run ./ingestion_utils
-        "as_float": lambda v: float(v) if v is not None else None,
-        "http_get_with_retry": lambda url, headers=None, timeout=30, retries=3: fake_get(url, headers=headers, timeout=timeout),
-        "StructType": lambda fields: None,
+        "como_float": lambda v: float(v) if v is not None else None,
+        "obter_http_com_retentativa": lambda url, cabecalhos=None, tempo_limite=30, tentativas=3: requisicao_falsa(url, cabecalhos=cabecalhos, tempo_limite=tempo_limite),
+        "StructType": lambda campos: None,
         "StructField": lambda *a, **k: None,
         "StringType": lambda: None,
         "BooleanType": lambda: None,
         "DoubleType": lambda: None,
-        "SCRYFALL_API_URL": "https://api.scryfall.test",
-        "SCRYFALL_HEADERS": {},
-        "MAX_RETRIES": 3,
-        "setup_s3_storage": lambda *a, **k: True,
-        "S3_BASE_PATH": "s3://test-bucket/stage",
+        "URL_API_SCRYFALL": "https://api.scryfall.test",
+        "CABECALHOS_SCRYFALL": {},
+        "MAX_TENTATIVAS": 3,
+        "configurar_armazenamento_s3": lambda *a, **k: True,
+        "CAMINHO_S3_STAGE": "s3://test-bucket/stage",
     }
-    exec(cell_source, ns)
-    return ns["_to_symbol_record"], ns["fetch_all_symbols"]
+    exec(codigo_celula, escopo)
+    return escopo["_para_registro_simbolo"], escopo["buscar_todos_simbolos"]
 
 class _Resp:
-    def __init__(self, json_data):
-        self._json = json_data
+    def __init__(self, dados_json):
+        self._dados_json = dados_json
 
     def json(self):
-        return self._json
+        return self._dados_json
 
     def raise_for_status(self):
         pass
 
-def _fake_get_for(symbols_data):
-    def fake_get(url, headers=None, timeout=None):
+def _requisicao_falsa_para(dados_simbolos):
+    def requisicao_falsa(url, cabecalhos=None, tempo_limite=None):
         assert url.endswith("/symbology")
-        return _Resp({"object": "list", "has_more": False, "data": symbols_data})
-    return fake_get
+        return _Resp({"object": "list", "has_more": False, "data": dados_simbolos})
+    return requisicao_falsa
 
-def test_fetch_all_symbols_maps_fields_in_single_request():
-    symbols_data = [
+def test_buscar_todos_simbolos_mapeia_campos_em_um_request():
+    dados_simbolos = [
         {"symbol": "{T}", "svg_uri": "https://svgs.scryfall.io/card-symbols/T.svg",
          "loose_variant": None, "english": "tap this permanent", "transposable": False,
          "represents_mana": False, "appears_in_mana_costs": False, "mana_value": 0.0,
@@ -56,19 +56,19 @@ def test_fetch_all_symbols_maps_fields_in_single_request():
          "colors": [], "gatherer_alternates": ["ocT", "oT"]},
     ]
 
-    _, fetch_all_symbols = _load_functions(_fake_get_for(symbols_data))
-    records = fetch_all_symbols()
+    _, buscar_todos_simbolos = _carregar_funcoes(_requisicao_falsa_para(dados_simbolos))
+    registros = buscar_todos_simbolos()
 
-    assert len(records) == 1
-    assert records[0]["symbol"] == "{T}"
-    assert records[0]["english"] == "tap this permanent"
-    assert records[0]["mana_value"] == 0.0
-    assert records[0]["colors"] == "[]"
-    assert records[0]["gatherer_alternates"] == json.dumps(["ocT", "oT"])
+    assert len(registros) == 1
+    assert registros[0]["symbol"] == "{T}"
+    assert registros[0]["english"] == "tap this permanent"
+    assert registros[0]["mana_value"] == 0.0
+    assert registros[0]["colors"] == "[]"
+    assert registros[0]["gatherer_alternates"] == json.dumps(["ocT", "oT"])
 
-def test_null_list_fields_stay_none():
+def test_listas_nulas_continuam_none():
     # null tem que continuar None, não virar a string "null" do json.dumps.
-    symbols_data = [
+    dados_simbolos = [
         {"symbol": "{CHAOS}", "svg_uri": "https://svgs.scryfall.io/card-symbols/CHAOS.svg",
          "loose_variant": None, "english": "chaos", "transposable": False,
          "represents_mana": False, "appears_in_mana_costs": False, "mana_value": 0.0,
@@ -76,27 +76,27 @@ def test_null_list_fields_stay_none():
          "colors": [], "gatherer_alternates": None},
     ]
 
-    to_symbol_record, _ = _load_functions(_fake_get_for([]))
-    record = to_symbol_record(symbols_data[0])
+    para_registro_simbolo, _ = _carregar_funcoes(_requisicao_falsa_para([]))
+    registro = para_registro_simbolo(dados_simbolos[0])
 
-    assert record["gatherer_alternates"] is None
-    assert record["colors"] == "[]"
+    assert registro["gatherer_alternates"] is None
+    assert registro["colors"] == "[]"
 
-def test_fetch_all_symbols_no_pagination_needed():
-    symbols_data = [{"symbol": f"{{S{i}}}", "svg_uri": f"https://x/{i}.svg",
+def test_buscar_todos_simbolos_sem_paginacao():
+    dados_simbolos = [{"symbol": f"{{S{i}}}", "svg_uri": f"https://x/{i}.svg",
                       "loose_variant": None, "english": f"symbol {i}", "transposable": False,
                       "represents_mana": False, "appears_in_mana_costs": False, "mana_value": 0.0,
                       "hybrid": False, "phyrexian": False, "cmc": 0.0, "funny": False,
                       "colors": [], "gatherer_alternates": None} for i in range(84)]
 
-    _, fetch_all_symbols = _load_functions(_fake_get_for(symbols_data))
-    records = fetch_all_symbols()
+    _, buscar_todos_simbolos = _carregar_funcoes(_requisicao_falsa_para(dados_simbolos))
+    registros = buscar_todos_simbolos()
 
-    assert len(records) == 84
+    assert len(registros) == 84
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    test_fetch_all_symbols_maps_fields_in_single_request()
-    test_null_list_fields_stay_none()
-    test_fetch_all_symbols_no_pagination_needed()
+    test_buscar_todos_simbolos_mapeia_campos_em_um_request()
+    test_listas_nulas_continuam_none()
+    test_buscar_todos_simbolos_sem_paginacao()
     print("OK")

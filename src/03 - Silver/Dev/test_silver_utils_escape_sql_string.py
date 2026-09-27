@@ -1,26 +1,26 @@
-# Testa _escape_sql_string() de silver_utils.py. O módulo exige pyspark/delta,
+# Testa _escapar_string_sql() de silver_utils.py. O módulo exige pyspark/delta,
 # então a função é copiada aqui; manter em sincronia.
 
 
-def escape_sql_string(value):
-    """Cópia de silver_utils._escape_sql_string."""
-    return value.replace("\\", "\\\\").replace("'", "\\'")
+def escapar_string_sql(valor):
+    """Cópia de silver_utils._escapar_string_sql."""
+    return valor.replace("\\", "\\\\").replace("'", "\\'")
 
 
-def test_apostrophe_is_backslash_escaped_not_doubled():
+def test_apostrofo_escapado_com_backslash_nao_duplicado():
     # Spark SQL não aceita '' como aspas literal; só backslash.
-    assert escape_sql_string("carta do jogador") == "carta do jogador"
-    assert escape_sql_string("o que e essa carta") == "o que e essa carta"
-    assert escape_sql_string("it's a trap") == "it\\'s a trap"
+    assert escapar_string_sql("carta do jogador") == "carta do jogador"
+    assert escapar_string_sql("o que e essa carta") == "o que e essa carta"
+    assert escapar_string_sql("it's a trap") == "it\\'s a trap"
 
 
-def test_literal_backslash_is_escaped_before_the_quote_pass():
+def test_backslash_literal_escapado_antes_da_aspa():
     # Backslash é escapado antes da aspa, senão o \' gerado seria escapado de novo.
-    assert escape_sql_string("a\\b") == "a\\\\b"
-    assert escape_sql_string("a\\'b") == "a\\\\\\'b"
+    assert escapar_string_sql("a\\b") == "a\\\\b"
+    assert escapar_string_sql("a\\'b") == "a\\\\\\'b"
 
 
 if __name__ == "__main__":
-    test_apostrophe_is_backslash_escaped_not_doubled()
-    test_literal_backslash_is_escaped_before_the_quote_pass()
+    test_apostrofo_escapado_com_backslash_nao_duplicado()
+    test_backslash_literal_escapado_antes_da_aspa()
     print("OK")

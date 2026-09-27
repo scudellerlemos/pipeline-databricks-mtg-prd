@@ -1,5 +1,5 @@
 # Importa ingestion_utils.py pelo caminho. Sem cluster não há dbutils, então a
-# escrita do controle em finish_run falha em silêncio, a menos que um dbutils
+# escrita do controle em finalizar_execucao falha em silêncio, a menos que um dbutils
 # fake seja injetado no módulo.
 
 import importlib.util
@@ -10,35 +10,35 @@ import types
 from contextlib import contextmanager
 
 # pyspark não está instalado no CI: stub mínimo só pro import de nível de
-# módulo (save_to_parquet não é testado aqui).
+# módulo (salvar_em_parquet não é testado aqui).
 if "pyspark" not in sys.modules:
     pyspark = types.ModuleType("pyspark")
     pyspark_sql = types.ModuleType("pyspark.sql")
     pyspark_sql_functions = types.ModuleType("pyspark.sql.functions")
     pyspark_sql_types = types.ModuleType("pyspark.sql.types")
-    for name in ("coalesce", "col", "lit", "current_timestamp", "year", "month", "when"):
-        setattr(pyspark_sql_functions, name, lambda *a, **k: None)
-    for name in ("StructType", "StructField", "StringType", "IntegerType", "FloatType"):
-        setattr(pyspark_sql_types, name, lambda *a, **k: None)
+    for nome in ("coalesce", "col", "lit", "current_timestamp", "year", "month", "when"):
+        setattr(pyspark_sql_functions, nome, lambda *a, **k: None)
+    for nome in ("StructType", "StructField", "StringType", "IntegerType", "FloatType"):
+        setattr(pyspark_sql_types, nome, lambda *a, **k: None)
     pyspark.sql = pyspark_sql
     sys.modules["pyspark"] = pyspark
     sys.modules["pyspark.sql"] = pyspark_sql
     sys.modules["pyspark.sql.functions"] = pyspark_sql_functions
     sys.modules["pyspark.sql.types"] = pyspark_sql_types
 
-_PATH = os.path.join(os.path.dirname(__file__), "ingestion_utils.py")
-_SPEC = importlib.util.spec_from_file_location("ingestion_utils", _PATH)
-ingestion_utils = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(ingestion_utils)
+_CAMINHO = os.path.join(os.path.dirname(__file__), "ingestion_utils.py")
+_ESPEC = importlib.util.spec_from_file_location("ingestion_utils", _CAMINHO)
+ingestion_utils = importlib.util.module_from_spec(_ESPEC)
+_ESPEC.loader.exec_module(ingestion_utils)
 
 
 class _Resp:
-    def __init__(self, status_code=200, json_data=None):
-        self.status_code = status_code
-        self._json = json_data
+    def __init__(self, codigo_status=200, dados_json=None):
+        self.status_code = codigo_status
+        self._dados_json = dados_json
 
     def json(self):
-        return self._json
+        return self._dados_json
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -46,201 +46,201 @@ class _Resp:
 
 
 @contextmanager
-def _patch(fake_get):
-    """Troca ingestion_utils.requests.get por fake_get e time.sleep por um no-op."""
-    real_get, real_sleep = ingestion_utils.requests.get, ingestion_utils.time.sleep
-    ingestion_utils.requests.get = fake_get
+def _substituir_requests(requisicao_falsa):
+    """Troca ingestion_utils.requests.get por requisicao_falsa e time.sleep por um no-op."""
+    requisicao_original, espera_original = ingestion_utils.requests.get, ingestion_utils.time.sleep
+    ingestion_utils.requests.get = requisicao_falsa
     ingestion_utils.time.sleep = lambda *_: None
     try:
         yield
     finally:
-        ingestion_utils.requests.get = real_get
-        ingestion_utils.time.sleep = real_sleep
+        ingestion_utils.requests.get = requisicao_original
+        ingestion_utils.time.sleep = espera_original
 
 
-def test_http_get_with_retry_returns_response_on_success():
-    with _patch(lambda *a, **k: _Resp(200, {"ok": True})):
-        resp = ingestion_utils.http_get_with_retry("https://x.test")
-    assert resp.json() == {"ok": True}
+def test_obter_http_com_retentativa_devolve_resposta_no_sucesso():
+    with _substituir_requests(lambda *a, **k: _Resp(200, {"ok": True})):
+        resposta = ingestion_utils.obter_http_com_retentativa("https://x.test")
+    assert resposta.json() == {"ok": True}
 
 
-def test_http_get_with_retry_retries_on_5xx_then_succeeds():
-    calls = {"n": 0}
+def test_obter_http_com_retentativa_repete_no_5xx_e_depois_passa():
+    chamadas = {"n": 0}
 
-    def fake_get(*a, **k):
-        calls["n"] += 1
-        return _Resp(503) if calls["n"] < 2 else _Resp(200, {"ok": True})
+    def requisicao_falsa(*a, **k):
+        chamadas["n"] += 1
+        return _Resp(503) if chamadas["n"] < 2 else _Resp(200, {"ok": True})
 
-    with _patch(fake_get):
-        resp = ingestion_utils.http_get_with_retry("https://x.test", retries=3)
+    with _substituir_requests(requisicao_falsa):
+        resposta = ingestion_utils.obter_http_com_retentativa("https://x.test", tentativas=3)
 
-    assert resp.json() == {"ok": True}
-    assert calls["n"] == 2
+    assert resposta.json() == {"ok": True}
+    assert chamadas["n"] == 2
 
 
-def test_http_get_with_retry_fails_fast_on_4xx():
-    calls = {"n": 0}
+def test_obter_http_com_retentativa_falha_na_hora_no_4xx():
+    chamadas = {"n": 0}
 
-    def fake_get(*a, **k):
-        calls["n"] += 1
+    def requisicao_falsa(*a, **k):
+        chamadas["n"] += 1
         return _Resp(404)
 
     try:
-        with _patch(fake_get):
-            ingestion_utils.http_get_with_retry("https://x.test", retries=3)
+        with _substituir_requests(requisicao_falsa):
+            ingestion_utils.obter_http_com_retentativa("https://x.test", tentativas=3)
     except Exception:
         pass
     else:
         raise AssertionError("expected exception for 404")
-    assert calls["n"] == 1  # 4xx nao tenta de novo
+    assert chamadas["n"] == 1  # 4xx nao tenta de novo
 
 
-def test_http_get_with_retry_raises_after_exhausting_retries():
+def test_obter_http_com_retentativa_levanta_apos_esgotar_tentativas():
     try:
-        with _patch(lambda *a, **k: _Resp(500)):
-            ingestion_utils.http_get_with_retry("https://x.test", retries=2)
+        with _substituir_requests(lambda *a, **k: _Resp(500)):
+            ingestion_utils.obter_http_com_retentativa("https://x.test", tentativas=2)
     except Exception:
         pass
     else:
         raise AssertionError("expected exception after exhausting retries")
 
 
-def test_get_scryfall_set_codes_since_filters_by_date_and_lowercases():
-    sets_data = {"data": [
+def test_obter_codigos_colecoes_filtra_por_data_e_poe_em_minusculas():
+    dados_colecoes = {"data": [
         {"code": "LEA", "released_at": "1993-08-05"},
         {"code": "TRC", "released_at": "2026-11-13"},
         {"code": "old", "released_at": "1990-01-01"},
     ]}
-    with _patch(lambda *a, **k: _Resp(200, sets_data)):
-        codes = ingestion_utils.get_scryfall_set_codes_since("https://api.scryfall.test", {}, "2000-01-01")
+    with _substituir_requests(lambda *a, **k: _Resp(200, dados_colecoes)):
+        codigos = ingestion_utils.obter_codigos_colecoes_scryfall_desde("https://api.scryfall.test", {}, "2000-01-01")
 
     # lea (1993) e old (1990) ficam fora da janela (cutoff 2000-01-01); trc
     # (2026) entra e o code vem normalizado pra minúsculo.
-    assert codes == ["trc"]
+    assert codigos == ["trc"]
 
 
-def test_start_run_has_expected_shape():
-    run = ingestion_utils.start_run("cards", endpoint="bulk-data/default_cards", params={"years_back": 5})
-    assert run["table_name"] == "cards"
-    assert run["status"] == "RUNNING"
-    assert run["origem"] == "scryfall"
-    assert len(run["run_id"]) == 12
+def test_iniciar_execucao_tem_o_formato_esperado():
+    execucao = ingestion_utils.iniciar_execucao("cards", endpoint="bulk-data/default_cards", parametros={"years_back": 5})
+    assert execucao["table_name"] == "cards"
+    assert execucao["status"] == "RUNNING"
+    assert execucao["origem"] == "scryfall"
+    assert len(execucao["run_id"]) == 12
 
 
-def test_finish_run_without_dbutils_does_not_raise():
+def test_finalizar_execucao_sem_dbutils_nao_levanta():
     # Sem dbutils o write do controle falha em silêncio, sem mudar o status.
-    run = ingestion_utils.start_run("cards", endpoint="bulk-data/default_cards")
-    run["files_written"] = 3
-    finished = ingestion_utils.finish_run(run, "s3://test-bucket/stage", "SUCCESS")
-    assert finished["status"] == "SUCCESS"
-    assert finished["files_written"] == 3
-    assert "duration_seconds" in finished
+    execucao = ingestion_utils.iniciar_execucao("cards", endpoint="bulk-data/default_cards")
+    execucao["files_written"] = 3
+    finalizada = ingestion_utils.finalizar_execucao(execucao, "s3://test-bucket/stage", "SUCCESS")
+    assert finalizada["status"] == "SUCCESS"
+    assert finalizada["files_written"] == 3
+    assert "duration_seconds" in finalizada
 
 
-def test_finish_run_writes_control_json_when_dbutils_available():
-    written = {}
+def test_finalizar_execucao_grava_json_de_controle_com_dbutils():
+    gravado = {}
 
     class _FakeFs:
-        def mkdirs(self, path):
-            written["dir"] = path
+        def mkdirs(self, caminho):
+            gravado["dir"] = caminho
 
-        def put(self, path, content, overwrite=True):
-            written["path"] = path
-            written["content"] = content
+        def put(self, caminho, conteudo, overwrite=True):
+            gravado["caminho"] = caminho
+            gravado["conteudo"] = conteudo
 
     ingestion_utils.dbutils = types.SimpleNamespace(fs=_FakeFs())
     try:
-        run = ingestion_utils.start_run("sets", endpoint="sets")
-        ingestion_utils.finish_run(run, "s3://test-bucket/stage", "FAILED", error="boom")
+        execucao = ingestion_utils.iniciar_execucao("sets", endpoint="sets")
+        ingestion_utils.finalizar_execucao(execucao, "s3://test-bucket/stage", "FAILED", erro="boom")
 
-        assert written["dir"] == "s3://test-bucket/stage/_control/sets"
-        assert written["path"] == f"s3://test-bucket/stage/_control/sets/{run['run_id']}.json"
-        payload = json.loads(written["content"])
-        assert payload["status"] == "FAILED"
-        assert payload["error"] == "boom"
+        assert gravado["dir"] == "s3://test-bucket/stage/_control/sets"
+        assert gravado["caminho"] == f"s3://test-bucket/stage/_control/sets/{execucao['run_id']}.json"
+        conteudo_json = json.loads(gravado["conteudo"])
+        assert conteudo_json["status"] == "FAILED"
+        assert conteudo_json["error"] == "boom"
     finally:
         del ingestion_utils.dbutils
 
 
-def test_run_stage_ingestion_success_returns_df_and_success_status():
-    run_seen = {}
+def test_executar_ingestao_stage_sucesso_devolve_df_e_status_success():
+    execucao_vista = {}
 
-    def ingest_fn(run):
-        run_seen["run"] = run
+    def funcao_ingestao(execucao):
+        execucao_vista["execucao"] = execucao
         return "fake-df"
 
-    df, run = ingestion_utils.run_stage_ingestion("sets", "sets", ingest_fn, "s3://test-bucket/stage")
+    df, execucao = ingestion_utils.executar_ingestao_stage("sets", "sets", funcao_ingestao, "s3://test-bucket/stage")
 
     assert df == "fake-df"
-    assert run is run_seen["run"]  # mesmo dict passado pra ingest_fn (run mutavel via finish_run)
-    assert run["status"] == "SUCCESS"
+    assert execucao is execucao_vista["execucao"]  # mesmo dict passado pra funcao_ingestao (execucao mutavel via finalizar_execucao)
+    assert execucao["status"] == "SUCCESS"
 
 
-def test_run_stage_ingestion_none_df_raises():
+def test_executar_ingestao_stage_df_none_levanta():
     # Tem que levantar para a task do job falhar.
     try:
-        ingestion_utils.run_stage_ingestion("sets", "sets", lambda run: None, "s3://test-bucket/stage")
+        ingestion_utils.executar_ingestao_stage("sets", "sets", lambda execucao: None, "s3://test-bucket/stage")
     except Exception as e:
         assert "nao gravou nada" in str(e), str(e)
     else:
-        raise AssertionError("esperava excecao quando ingest_fn nao grava nada")
+        raise AssertionError("esperava excecao quando funcao_ingestao nao grava nada")
 
 
-def test_as_float_converte_int_e_preserva_none():
+def test_como_float_converte_int_e_preserva_none():
     # Scryfall pode devolver int (ex.: mana_value 0) e o schema e DoubleType;
     # createDataFrame rejeita int nesse caso.
-    assert ingestion_utils.as_float(0) == 0.0
-    assert isinstance(ingestion_utils.as_float(0), float)
-    assert isinstance(ingestion_utils.as_float(3), float)
-    assert ingestion_utils.as_float(1.5) == 1.5
-    assert ingestion_utils.as_float(None) is None
+    assert ingestion_utils.como_float(0) == 0.0
+    assert isinstance(ingestion_utils.como_float(0), float)
+    assert isinstance(ingestion_utils.como_float(3), float)
+    assert ingestion_utils.como_float(1.5) == 1.5
+    assert ingestion_utils.como_float(None) is None
 
 
-def test_run_stage_ingestion_none_df_propaga_erro_do_save():
-    # save_to_parquet so registra o erro em run["error"]; a mensagem tem que
+def test_executar_ingestao_stage_df_none_propaga_erro_do_salvar():
+    # salvar_em_parquet so registra o erro em execucao["error"]; a mensagem tem que
     # chegar na excecao do job.
-    def ingest_fn(run):
-        run["error"] = "S3 timeout"
+    def funcao_ingestao(execucao):
+        execucao["error"] = "S3 timeout"
         return None
 
     try:
-        ingestion_utils.run_stage_ingestion("sets", "sets", ingest_fn, "s3://test-bucket/stage")
+        ingestion_utils.executar_ingestao_stage("sets", "sets", funcao_ingestao, "s3://test-bucket/stage")
     except Exception as e:
         assert "S3 timeout" in str(e), str(e)
     else:
         raise AssertionError("esperava excecao")
 
 
-def test_run_stage_ingestion_exception_marks_failed_and_reraises():
-    def ingest_fn(run):
+def test_executar_ingestao_stage_excecao_marca_failed_e_propaga():
+    def funcao_ingestao(execucao):
         raise ValueError("boom")
 
     try:
-        ingestion_utils.run_stage_ingestion("sets", "sets", ingest_fn, "s3://test-bucket/stage")
+        ingestion_utils.executar_ingestao_stage("sets", "sets", funcao_ingestao, "s3://test-bucket/stage")
     except ValueError as e:
         assert str(e) == "boom"
     else:
         raise AssertionError("expected ValueError to propagate")
 
 
-def test_run_timestamp_e_constante_entre_chamadas():
-    # save_to_parquet faz um .write por particao; o carimbo tem que ser o mesmo
+def test_carimbo_da_execucao_e_constante_entre_chamadas():
+    # salvar_em_parquet faz um .write por particao; o carimbo tem que ser o mesmo
     # em todas (DT_INGESTAO faz parte da chave de merge da Silver).
-    run = ingestion_utils.start_run("card_prices", "bulk-data/default_cards")
+    execucao = ingestion_utils.iniciar_execucao("card_prices", "bulk-data/default_cards")
 
-    assert ingestion_utils._run_timestamp(run) == ingestion_utils._run_timestamp(run)
-    assert ingestion_utils._run_timestamp(run).isoformat() == run["started_at"]
-    # run e opcional em save_to_parquet - sem ele ainda devolve um carimbo
-    assert ingestion_utils._run_timestamp(None) is not None
+    assert ingestion_utils._carimbo_da_execucao(execucao) == ingestion_utils._carimbo_da_execucao(execucao)
+    assert ingestion_utils._carimbo_da_execucao(execucao).isoformat() == execucao["started_at"]
+    # execucao e opcional em salvar_em_parquet - sem ele ainda devolve um carimbo
+    assert ingestion_utils._carimbo_da_execucao(None) is not None
 
 
-def test_env_var_sobrescreve_o_prefixo_de_stage():
+def test_variavel_ambiente_sobrescreve_o_prefixo_de_stage():
     # Stage escreve fora do Unity Catalog: so o caminho no S3 (bucket/prefixo,
     # via env var) separa os ambientes.
-    assert ingestion_utils.config_override("s3_stage_prefix") is None
+    assert ingestion_utils.config_do_ambiente("s3_stage_prefix") is None
     os.environ["MTG_S3_STAGE_PREFIX"] = "prod/stage"
     try:
-        assert ingestion_utils.get_secret("s3_stage_prefix", "stage") == "prod/stage"
+        assert ingestion_utils.obter_segredo("s3_stage_prefix", "stage") == "prod/stage"
     finally:
         del os.environ["MTG_S3_STAGE_PREFIX"]
 
@@ -248,8 +248,8 @@ def test_env_var_sobrescreve_o_prefixo_de_stage():
 def test_nome_do_parquet_nao_colide_entre_meses_no_mesmo_dia():
     # sets/card_prices particionam por releaseDate; o nome precisa da data
     # completa da run pra nao colidir entre meses.
-    setembro = ingestion_utils.parquet_file_name(2021, 3, "20260905", "card_prices")
-    outubro = ingestion_utils.parquet_file_name(2021, 3, "20261005", "card_prices")
+    setembro = ingestion_utils.nome_arquivo_parquet(2021, 3, "20260905", "card_prices")
+    outubro = ingestion_utils.nome_arquivo_parquet(2021, 3, "20261005", "card_prices")
     assert setembro == "2021_03_20260905_card_prices.parquet"
     assert setembro != outubro
 
@@ -258,28 +258,28 @@ def test_s3_bucket_do_ambiente_perde_o_esquema():
     # Stage monta f"s3://{bucket}/..."; com esquema no valor vira "s3://s3://".
     os.environ["MTG_S3_BUCKET"] = "s3://magicthegatheringdev/prd"
     try:
-        assert ingestion_utils.get_secret("s3_bucket") == "magicthegatheringdev/prd"
+        assert ingestion_utils.obter_segredo("s3_bucket") == "magicthegatheringdev/prd"
     finally:
         del os.environ["MTG_S3_BUCKET"]
 
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    test_http_get_with_retry_returns_response_on_success()
-    test_http_get_with_retry_retries_on_5xx_then_succeeds()
-    test_http_get_with_retry_fails_fast_on_4xx()
-    test_http_get_with_retry_raises_after_exhausting_retries()
-    test_get_scryfall_set_codes_since_filters_by_date_and_lowercases()
-    test_start_run_has_expected_shape()
-    test_finish_run_without_dbutils_does_not_raise()
-    test_finish_run_writes_control_json_when_dbutils_available()
-    test_run_stage_ingestion_success_returns_df_and_success_status()
-    test_run_stage_ingestion_none_df_raises()
-    test_as_float_converte_int_e_preserva_none()
-    test_run_stage_ingestion_none_df_propaga_erro_do_save()
-    test_run_stage_ingestion_exception_marks_failed_and_reraises()
-    test_run_timestamp_e_constante_entre_chamadas()
-    test_env_var_sobrescreve_o_prefixo_de_stage()
+    test_obter_http_com_retentativa_devolve_resposta_no_sucesso()
+    test_obter_http_com_retentativa_repete_no_5xx_e_depois_passa()
+    test_obter_http_com_retentativa_falha_na_hora_no_4xx()
+    test_obter_http_com_retentativa_levanta_apos_esgotar_tentativas()
+    test_obter_codigos_colecoes_filtra_por_data_e_poe_em_minusculas()
+    test_iniciar_execucao_tem_o_formato_esperado()
+    test_finalizar_execucao_sem_dbutils_nao_levanta()
+    test_finalizar_execucao_grava_json_de_controle_com_dbutils()
+    test_executar_ingestao_stage_sucesso_devolve_df_e_status_success()
+    test_executar_ingestao_stage_df_none_levanta()
+    test_como_float_converte_int_e_preserva_none()
+    test_executar_ingestao_stage_df_none_propaga_erro_do_salvar()
+    test_executar_ingestao_stage_excecao_marca_failed_e_propaga()
+    test_carimbo_da_execucao_e_constante_entre_chamadas()
+    test_variavel_ambiente_sobrescreve_o_prefixo_de_stage()
     test_nome_do_parquet_nao_colide_entre_meses_no_mesmo_dia()
     test_s3_bucket_do_ambiente_perde_o_esquema()
     print("OK")

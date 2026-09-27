@@ -5,116 +5,116 @@ import json
 import os
 import sys
 
-_NB_PATH = os.path.join(os.path.dirname(__file__), "sets.py")
-_MARKER = "FUNÇÕES ESPECÍFICAS DE SETS"
+_CAMINHO_NOTEBOOK = os.path.join(os.path.dirname(__file__), "sets.py")
+_MARCADOR = "FUNÇÕES ESPECÍFICAS DE SETS"
 
 
-def _load_functions(fake_get):
-    cells = open(_NB_PATH, encoding="utf-8").read().split("# COMMAND ----------")
-    cell_source = next(c for c in cells if _MARKER in c)
+def _carregar_funcoes(requisicao_falsa):
+    celulas = open(_CAMINHO_NOTEBOOK, encoding="utf-8").read().split("# COMMAND ----------")
+    codigo_celula = next(c for c in celulas if _MARCADOR in c)
 
-    ns = {
+    escopo = {
         "json": json,
-        "http_get_with_retry": lambda url, headers=None, timeout=30, retries=3: fake_get(url, headers=headers, timeout=timeout),
-        "StructType": lambda fields: None,
+        "obter_http_com_retentativa": lambda url, cabecalhos=None, tempo_limite=30, tentativas=3: requisicao_falsa(url, cabecalhos=cabecalhos, tempo_limite=tempo_limite),
+        "StructType": lambda campos: None,
         "StructField": lambda *a, **k: None,
         "StringType": lambda: None,
         "IntegerType": lambda: None,
         "BooleanType": lambda: None,
-        "SCRYFALL_API_URL": "https://api.scryfall.test",
-        "SCRYFALL_HEADERS": {},
-        "MAX_RETRIES": 3,
-        "setup_s3_storage": lambda *a, **k: True,
-        "S3_BASE_PATH": "s3://test-bucket/stage",
+        "URL_API_SCRYFALL": "https://api.scryfall.test",
+        "CABECALHOS_SCRYFALL": {},
+        "MAX_TENTATIVAS": 3,
+        "configurar_armazenamento_s3": lambda *a, **k: True,
+        "CAMINHO_S3_STAGE": "s3://test-bucket/stage",
     }
-    exec(cell_source, ns)
-    return ns["_to_set_record"], ns["fetch_all_sets"], ns["clean_sets_data"]
+    exec(codigo_celula, escopo)
+    return escopo["_para_registro_colecao"], escopo["buscar_todas_colecoes"], escopo["limpar_dados_colecoes"]
 
 
 class _Resp:
-    def __init__(self, json_data):
-        self._json = json_data
+    def __init__(self, dados_json):
+        self._dados_json = dados_json
 
     def json(self):
-        return self._json
+        return self._dados_json
 
     def raise_for_status(self):
         pass
 
 
-def _fake_get_for(sets_data):
-    def fake_get(url, headers=None, timeout=None):
+def _requisicao_falsa_para(dados_colecoes):
+    def requisicao_falsa(url, cabecalhos=None, tempo_limite=None):
         assert url.endswith("/sets")
-        return _Resp({"object": "list", "has_more": False, "data": sets_data})
-    return fake_get
+        return _Resp({"object": "list", "has_more": False, "data": dados_colecoes})
+    return requisicao_falsa
 
 
-def test_fetch_all_sets_maps_fields_in_single_request():
-    sets_data = [
+def test_buscar_todas_colecoes_mapeia_campos_em_um_request():
+    dados_colecoes = [
         {"code": "lea", "name": "Limited Edition Alpha", "set_type": "core",
          "released_at": "1993-08-05", "digital": False},
         {"code": "trc", "name": "Star Trek Commander", "set_type": "commander",
          "released_at": "2026-11-13", "digital": False},
     ]
 
-    _, fetch_all_sets, _ = _load_functions(_fake_get_for(sets_data))
-    records = fetch_all_sets()
+    _, buscar_todas_colecoes, _ = _carregar_funcoes(_requisicao_falsa_para(dados_colecoes))
+    registros = buscar_todas_colecoes()
 
-    assert len(records) == 2
-    assert records[0]["code"] == "lea"
-    assert records[0]["type"] == "core"
-    assert records[0]["releaseDate"] == "1993-08-05"
-    assert records[0]["onlineOnly"] is False
+    assert len(registros) == 2
+    assert registros[0]["code"] == "lea"
+    assert registros[0]["type"] == "core"
+    assert registros[0]["releaseDate"] == "1993-08-05"
+    assert registros[0]["onlineOnly"] is False
 
 
-def test_fetch_all_sets_no_pagination_needed():
-    sets_data = [{"code": f"s{i}", "name": f"Set {i}", "set_type": "expansion",
+def test_buscar_todas_colecoes_sem_paginacao():
+    dados_colecoes = [{"code": f"s{i}", "name": f"Set {i}", "set_type": "expansion",
                   "released_at": "2020-01-01", "digital": False} for i in range(1049)]
 
-    _, fetch_all_sets, _ = _load_functions(_fake_get_for(sets_data))
-    records = fetch_all_sets()
+    _, buscar_todas_colecoes, _ = _carregar_funcoes(_requisicao_falsa_para(dados_colecoes))
+    registros = buscar_todas_colecoes()
 
-    assert len(records) == 1049
+    assert len(registros) == 1049
 
 
-def test_fetch_all_sets_maps_new_scryfall_only_fields():
-    sets_data = [{
+def test_buscar_todas_colecoes_mapeia_campos_nativos_da_scryfall():
+    dados_colecoes = [{
         "code": "dmc", "name": "Duskmourn Commander", "set_type": "commander",
         "released_at": "2024-09-27", "digital": False,
         "card_count": 240, "parent_set_code": "dmu", "block": "Commander",
         "icon_svg_uri": "https://svgs.scryfall.io/sets/dmc.svg?1234",
     }]
 
-    _, fetch_all_sets, clean_sets_data = _load_functions(_fake_get_for(sets_data))
-    records = fetch_all_sets()
-    cleaned = clean_sets_data(records)[0]
+    _, buscar_todas_colecoes, limpar_dados_colecoes = _carregar_funcoes(_requisicao_falsa_para(dados_colecoes))
+    registros = buscar_todas_colecoes()
+    limpo = limpar_dados_colecoes(registros)[0]
 
-    assert cleaned["card_count"] == 240
-    assert cleaned["parent_set_code"] == "dmu"
-    assert cleaned["block"] == "Commander"
-    assert cleaned["icon_svg_uri"] == "https://svgs.scryfall.io/sets/dmc.svg?1234"
+    assert limpo["card_count"] == 240
+    assert limpo["parent_set_code"] == "dmu"
+    assert limpo["block"] == "Commander"
+    assert limpo["icon_svg_uri"] == "https://svgs.scryfall.io/sets/dmc.svg?1234"
 
 
-def test_magicthegathering_only_fields_become_none_after_clean():
+def test_campos_legados_viram_none_apos_limpar():
     # Campos legados sem equivalente na Scryfall ficam None.
-    to_set_record, _, clean_sets_data = _load_functions(_fake_get_for([]))
-    record = to_set_record({"code": "lea", "name": "Alpha", "set_type": "core",
+    para_registro_colecao, _, limpar_dados_colecoes = _carregar_funcoes(_requisicao_falsa_para([]))
+    registro = para_registro_colecao({"code": "lea", "name": "Alpha", "set_type": "core",
                              "released_at": "1993-08-05", "digital": False})
 
-    cleaned = clean_sets_data([record])[0]
-    assert cleaned["border"] is None
-    assert cleaned["mkm_id"] is None
-    assert cleaned["gathererCode"] is None
-    assert cleaned["oldCode"] is None
-    assert cleaned["booster"] is None
-    assert cleaned["code"] == "lea"
-    assert cleaned["onlineOnly"] is False
+    limpo = limpar_dados_colecoes([registro])[0]
+    assert limpo["border"] is None
+    assert limpo["mkm_id"] is None
+    assert limpo["gathererCode"] is None
+    assert limpo["oldCode"] is None
+    assert limpo["booster"] is None
+    assert limpo["code"] == "lea"
+    assert limpo["onlineOnly"] is False
 
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    test_fetch_all_sets_maps_fields_in_single_request()
-    test_fetch_all_sets_no_pagination_needed()
-    test_fetch_all_sets_maps_new_scryfall_only_fields()
-    test_magicthegathering_only_fields_become_none_after_clean()
+    test_buscar_todas_colecoes_mapeia_campos_em_um_request()
+    test_buscar_todas_colecoes_sem_paginacao()
+    test_buscar_todas_colecoes_mapeia_campos_nativos_da_scryfall()
+    test_campos_legados_viram_none_apos_limpar()
     print("OK")

@@ -62,13 +62,13 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS,
 - **Filtro temporal:** não aplicado (histórico de migração é útil por completo).
 - **Merge incremental:** por `ID_MIGRACAO`, desempate por `DT_INGESTAO` mais recente.
 - **Particionamento:** por `ANO_EXECUCAO` e `MES_EXECUCAO`.
-- **Resolução de cadeia (`ID_CARTA_CANONICO`):** segue a cadeia de unificações em Python puro (`_resolve_id_chain`, máx. 10 saltos, seguro contra ciclo) a partir das migrações com `NME_ESTRATEGIA_MIGRACAO = 'Unificacao'` e `ID_CARTA_NOVO` preenchido - testado isoladamente em `test_migration_chain.py`.
+- **Resolução de cadeia (`ID_CARTA_CANONICO`):** segue a cadeia de unificações em Python puro (`_resolver_cadeia_ids`, máx. 10 saltos, seguro contra ciclo) a partir das migrações com `NME_ESTRATEGIA_MIGRACAO = 'Unificacao'` e `ID_CARTA_NOVO` preenchido - testado isoladamente em `test_migration_chain.py`.
 - **Regra "sem `( ) { }` no dado Silver":** `DESC_NOTA` converte `{...}`/`(...)` para `[...]`, mesma regra de `TB_FATO_CARTAS`.
 
 ## 9. Histórico de Alterações
 | Data | Responsável | Alteração |
 |---|---|---|
-| 2026-09-08 | Felipe | AUD-20 (#135): implementação inicial de `_resolve_id_chain`/`attach_canonical_id` dentro de `TB_FATO_SILVER_CARDS.py` |
+| 2026-09-08 | Felipe | AUD-20 (#135): implementação inicial de `_resolver_cadeia_ids`/`anexar_id_canonico` dentro de `TB_FATO_SILVER_CARDS.py` |
 | 2026-09-15 | Felipe | #115/#116: criada como tabela própria `TB_MOV_MIGRACOES_CARTAS` (DAMA - MOV), lógica de resolução de cadeia relocada de `TB_FATO_CARTAS.py`, documentação de colunas de negócio no Unity Catalog |
 
 ## 10. Observações

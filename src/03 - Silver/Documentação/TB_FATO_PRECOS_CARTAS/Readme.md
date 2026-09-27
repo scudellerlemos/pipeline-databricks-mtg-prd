@@ -61,7 +61,7 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS 
 
 ## 8. Regras de Implementação
 - **Filtro temporal:** nenhum na Silver; a Stage já restringe a impressões com `releaseDate` >= 1º de janeiro de (ano atual − `years_back`, padrão 5) - não é o preço de todas as impressões.
-- **Merge incremental:** por `ID_CARTA` + `DT_INGESTAO` (duplicata exata da chave resolvida por `dropDuplicates`, sem `order_by_col`).
+- **Merge incremental:** por `ID_CARTA` + `DT_INGESTAO` (duplicata exata da chave resolvida por `dropDuplicates`, sem `coluna_ordenacao`).
 - **Particionamento:** por `ANO_INGESTAO` e `MES_INGESTAO`.
 - **Limpeza:** `NME_CARTA`/`NME_RARIDADE` em Title Case, `COD_COLECAO` em upper case; `VLR_*` sem coalesce (NULO permanece NULO).
 

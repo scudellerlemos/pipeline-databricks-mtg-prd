@@ -13,8 +13,8 @@ from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType
 
 # =============================================================================
-# FUNÇÕES COMPARTILHADAS (get_secret/setup_s3_storage/save_to_parquet/
-# http_get_with_retry/start_run/finish_run vivem em ingestion_utils.py)
+# FUNÇÕES COMPARTILHADAS (obter_segredo/configurar_armazenamento_s3/salvar_em_parquet/
+# obter_http_com_retentativa/iniciar_execucao/finalizar_execucao vivem em ingestion_utils.py)
 # =============================================================================
 
 # COMMAND ----------
@@ -26,32 +26,32 @@ from pyspark.sql.types import StructType, StructField, StringType
 # =============================================================================
 # VARIÁVEIS DE CONFIGURAÇÃO
 # =============================================================================
-S3_BUCKET = get_secret("s3_bucket")
-S3_STAGE_PREFIX = get_secret("s3_stage_prefix", "stage")
-S3_BASE_PATH = f"s3://{S3_BUCKET}/{S3_STAGE_PREFIX}"
-SCRYFALL_API_URL = get_secret("scryfall_api_url")
+BUCKET_S3 = obter_segredo("s3_bucket")
+PREFIXO_S3_STAGE = obter_segredo("s3_stage_prefix", "stage")
+CAMINHO_S3_STAGE = f"s3://{BUCKET_S3}/{PREFIXO_S3_STAGE}"
+URL_API_SCRYFALL = obter_segredo("scryfall_api_url")
 # Scryfall rejeita o User-Agent default do requests (erro "generic_user_agent")
-SCRYFALL_HEADERS = {"User-Agent": "MTGPipeline/1.0"}
-MAX_RETRIES = int(get_secret("max_retries", "3"))
+CABECALHOS_SCRYFALL = {"User-Agent": "MTGPipeline/1.0"}
+MAX_TENTATIVAS = int(obter_segredo("max_retries", "3"))
 # default_cards = 1 objeto por impressão, cada um com seu `prices` (o preço
 # varia por impressão). Mesmo bulk de cards.py.
-SCRYFALL_BULK_TYPE = "default_cards"
+TIPO_BULK_SCRYFALL = "default_cards"
 
 # Janela temporal (years_back): filtra pelo released_at da própria impressão,
 # sem depender da execução de cards/sets.
-YEARS_BACK = int(get_secret("years_back", "5"))
-current_year = datetime.now().year
-cutoff_year = current_year - YEARS_BACK
-CUTOFF_DATE_STR = datetime(cutoff_year, 1, 1).strftime("%Y-%m-%d")
+ANOS_RETROATIVOS = int(obter_segredo("years_back", "5"))
+ano_atual = datetime.now().year
+ano_corte = ano_atual - ANOS_RETROATIVOS
+DATA_CORTE_TEXTO = datetime(ano_corte, 1, 1).strftime("%Y-%m-%d")
 
-print(f"YEARS_BACK: {YEARS_BACK} | CUTOFF_DATE_STR: {CUTOFF_DATE_STR}")
+print(f"ANOS_RETROATIVOS: {ANOS_RETROATIVOS} | DATA_CORTE_TEXTO: {DATA_CORTE_TEXTO}")
 
 # COMMAND ----------
 
 # =============================================================================
 # FUNÇÕES ESPECÍFICAS DE CARD_PRICES
 # =============================================================================
-CARD_PRICES_SCHEMA = StructType([
+ESQUEMA_PRECOS_CARTAS = StructType([
     # id da impressão (mesmo `id` de cards.py). Vira ID_CARTA na Silver, chave
     # do join com TB_FATO_CARTAS feito na Gold.
     StructField("id", StringType(), True),
@@ -71,62 +71,62 @@ CARD_PRICES_SCHEMA = StructType([
 ])
 
 
-def _to_price_record(card):
+def _para_registro_preco(carta):
     # Grava como a Scryfall devolve; o join com `cards` (por id) fica na Gold.
-    prices = card.get("prices", {}) or {}
+    precos = carta.get("prices", {}) or {}
     # Dupla face (DFC) não tem image_uris na raiz - usa card_faces[0] (frente).
-    faces = card.get("card_faces") or [{}]
-    image_uris = card.get("image_uris") or faces[0].get("image_uris")
+    faces = carta.get("card_faces") or [{}]
+    uris_imagem = carta.get("image_uris") or faces[0].get("image_uris")
     return {
-        "id": card.get("id"),
-        "name": card.get("name"),
-        "set": card.get("set"),
-        "rarity": card.get("rarity"),
-        "usd": prices.get("usd"),
-        "usd_foil": prices.get("usd_foil"),
-        "usd_etched": prices.get("usd_etched"),
-        "eur": prices.get("eur"),
-        "eur_foil": prices.get("eur_foil"),
-        "tix": prices.get("tix"),
-        "scryfall_uri": card.get("scryfall_uri"),
-        "image_url": image_uris.get("normal") if image_uris else None,
-        "releaseDate": card.get("released_at"),
+        "id": carta.get("id"),
+        "name": carta.get("name"),
+        "set": carta.get("set"),
+        "rarity": carta.get("rarity"),
+        "usd": precos.get("usd"),
+        "usd_foil": precos.get("usd_foil"),
+        "usd_etched": precos.get("usd_etched"),
+        "eur": precos.get("eur"),
+        "eur_foil": precos.get("eur_foil"),
+        "tix": precos.get("tix"),
+        "scryfall_uri": carta.get("scryfall_uri"),
+        "image_url": uris_imagem.get("normal") if uris_imagem else None,
+        "releaseDate": carta.get("released_at"),
     }
 
 
-def fetch_price_records():
+def buscar_registros_precos():
     # 1 request pro índice do Bulk Data + 1 pro catálogo inteiro.
-    resp = http_get_with_retry(f"{SCRYFALL_API_URL}/bulk-data", headers=SCRYFALL_HEADERS, retries=MAX_RETRIES)
-    entry = next(e for e in resp.json()["data"] if e["type"] == SCRYFALL_BULK_TYPE)
+    resposta = obter_http_com_retentativa(f"{URL_API_SCRYFALL}/bulk-data", cabecalhos=CABECALHOS_SCRYFALL, tentativas=MAX_TENTATIVAS)
+    entrada = next(e for e in resposta.json()["data"] if e["type"] == TIPO_BULK_SCRYFALL)
 
-    raw = http_get_with_retry(entry["jsonl_download_uri"], headers=SCRYFALL_HEADERS, timeout=120, retries=MAX_RETRIES).content
+    bruto = obter_http_com_retentativa(entrada["jsonl_download_uri"], cabecalhos=CABECALHOS_SCRYFALL, tempo_limite=120, tentativas=MAX_TENTATIVAS).content
     return [
-        _to_price_record(json.loads(line))
-        for line in gzip.decompress(raw).decode("utf-8").splitlines()
-        if line.strip()
+        _para_registro_preco(json.loads(linha))
+        for linha in gzip.decompress(bruto).decode("utf-8").splitlines()
+        if linha.strip()
     ]
 
 
-def ingest_card_prices(table_name="card_prices", run=None):
-    print(f"Baixando catálogo de preços Scryfall ({SCRYFALL_BULK_TYPE})...")
+def ingerir_precos_cartas(nome_tabela="card_prices", execucao=None):
+    print(f"Baixando catálogo de preços Scryfall ({TIPO_BULK_SCRYFALL})...")
 
-    all_data = fetch_price_records()
-    print(f"Preços obtidos do catálogo: {len(all_data)}")
+    dados_tabela = buscar_registros_precos()
+    print(f"Preços obtidos do catálogo: {len(dados_tabela)}")
 
-    if not all_data:
-        print(f"Nenhum dado válido para {table_name}")
+    if not dados_tabela:
+        print(f"Nenhum dado válido para {nome_tabela}")
         return None
 
-    df = save_to_parquet(
-        spark, all_data, table_name, S3_BASE_PATH,
-        schema=CARD_PRICES_SCHEMA,
-        partition_source_col="releaseDate", cutoff_date_str=CUTOFF_DATE_STR,
-        run=run,
+    df = salvar_em_parquet(
+        spark, dados_tabela, nome_tabela, CAMINHO_S3_STAGE,
+        esquema=ESQUEMA_PRECOS_CARTAS,
+        coluna_origem_particao="releaseDate", data_corte=DATA_CORTE_TEXTO,
+        execucao=execucao,
     )
 
     if df is not None:
-        count = df.count()
-        print(f"{table_name}: {count} registros processados")
+        total = df.count()
+        print(f"{nome_tabela}: {total} registros processados")
         return df
     return None
 
@@ -151,18 +151,18 @@ except NameError:
         raise Exception("Spark não está disponível")
 
 # Configurar S3 Storage
-setup_success = setup_s3_storage(S3_BASE_PATH)
-if not setup_success:
+sucesso_configuracao = configurar_armazenamento_s3(CAMINHO_S3_STAGE)
+if not sucesso_configuracao:
     raise Exception("Falha ao configurar S3 storage")
 
 print("Setup concluído com sucesso")
 
-# Executa com controle de execução (ver run_stage_ingestion em ingestion_utils.py)
-prices_df, run = run_stage_ingestion(
+# Executa com controle de execução (ver executar_ingestao_stage em ingestion_utils.py)
+df_precos, execucao = executar_ingestao_stage(
     "card_prices", "bulk-data/default_cards",
-    lambda run: ingest_card_prices(table_name="card_prices", run=run),
-    S3_BASE_PATH,
-    params={"years_back": YEARS_BACK},
+    lambda execucao: ingerir_precos_cartas(nome_tabela="card_prices", execucao=execucao),
+    CAMINHO_S3_STAGE,
+    parametros={"years_back": ANOS_RETROATIVOS},
 )
 
 # Gerar relatório
@@ -170,10 +170,10 @@ print("=" * 50)
 print("RELATÓRIO DE INGESTÃO DE PREÇOS")
 print("=" * 50)
 
-if prices_df is not None:
+if df_precos is not None:
     print("Arquivos salvos com sucesso")
-    print(f"Total de registros: {prices_df.count()}")
-    print(f"Particionamento: por releaseDate (janela de {YEARS_BACK} anos)")
+    print(f"Total de registros: {df_precos.count()}")
+    print(f"Particionamento: por releaseDate (janela de {ANOS_RETROATIVOS} anos)")
 else:
     print("Falha na ingestão de preços")
 

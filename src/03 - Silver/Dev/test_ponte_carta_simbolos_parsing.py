@@ -27,7 +27,7 @@ def test_custo_nulo_nao_gera_simbolo():
     assert extrair_simbolos(None) == []
 
 
-def test_posicao_e_1_based_apos_enumerar():
+def test_posicao_comeca_em_1_apos_enumerar():
     simbolos = extrair_simbolos("[2][U][U]")
     posicoes = list(enumerate(simbolos, start=1))
     assert posicoes == [(1, "[2]"), (2, "[U]"), (3, "[U]")]
