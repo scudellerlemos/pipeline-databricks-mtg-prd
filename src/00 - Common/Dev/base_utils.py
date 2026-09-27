@@ -44,6 +44,19 @@ def config_override(secret_name):
     return os.environ.get("MTG_" + secret_name.upper()) or None
 
 
+def _bucket_sem_esquema(secret_name, value):
+    """s3_bucket sempre sem "s3://", venha de onde vier.
+
+    Stage e Bronze montam f"s3://{bucket}/...", Silver e Gold aceitam os dois.
+    Com "s3://" no valor, as duas primeiras gravavam em "s3://s3://..." - foi
+    o que derrubou a primeira carga de producao. Normaliza aqui, por onde
+    todas passam, em vez de ensinar cada notebook.
+    """
+    if secret_name == "s3_bucket" and value.startswith("s3://"):
+        return value[len("s3://"):]
+    return value
+
+
 def _barra_catalogo_de_dev_em_producao(secret_name, value):
     """Producao nunca pode resolver o catalogo pra mtg_dev.
 
@@ -123,11 +136,12 @@ def get_secret(secret_name, default_value=None, extra_safe_defaults=None):
     override = config_override(secret_name)
     if override:
         print(f"Config '{secret_name}' veio do ambiente: {override}")
-        return _barra_catalogo_de_dev_em_producao(secret_name, override)
+        return _barra_catalogo_de_dev_em_producao(secret_name, _bucket_sem_esquema(secret_name, override))
 
     try:
         return _barra_catalogo_de_dev_em_producao(
-            secret_name, dbutils.secrets.get(scope="mtg-pipeline", key=secret_name)
+            secret_name,
+            _bucket_sem_esquema(secret_name, dbutils.secrets.get(scope="mtg-pipeline", key=secret_name)),
         )
     except Exception:
         if default_value is not None:

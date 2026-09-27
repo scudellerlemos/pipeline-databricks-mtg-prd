@@ -266,6 +266,15 @@ def test_nome_do_parquet_nao_colide_entre_meses_no_mesmo_dia():
     assert setembro != outubro
 
 
+def test_s3_bucket_do_ambiente_perde_o_esquema():
+    # Stage monta f"s3://{bucket}/..."; com esquema no valor vira "s3://s3://".
+    os.environ["MTG_S3_BUCKET"] = "s3://magicthegatheringdev/prd"
+    try:
+        assert ingestion_utils.get_secret("s3_bucket") == "magicthegatheringdev/prd"
+    finally:
+        del os.environ["MTG_S3_BUCKET"]
+
+
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     test_http_get_with_retry_returns_response_on_success()
@@ -284,4 +293,5 @@ if __name__ == "__main__":
     test_run_timestamp_e_constante_entre_chamadas()
     test_env_var_sobrescreve_o_prefixo_de_stage()
     test_nome_do_parquet_nao_colide_entre_meses_no_mesmo_dia()
+    test_s3_bucket_do_ambiente_perde_o_esquema()
     print("OK")

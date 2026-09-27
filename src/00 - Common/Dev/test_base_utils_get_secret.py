@@ -17,6 +17,16 @@ def test_explicit_default_wins():
     assert base_utils.get_secret("s3_bucket", default_value="s3://explicit") == "s3://explicit"
 
 
+def test_s3_bucket_from_env_drops_scheme():
+    # Stage/Bronze prefixam "s3://" sozinhos: com o esquema no valor, o
+    # caminho vira "s3://s3://..." e o S3 responde 400.
+    os.environ["MTG_S3_BUCKET"] = "s3://magicthegatheringdev/prd"
+    try:
+        assert base_utils.get_secret("s3_bucket") == "magicthegatheringdev/prd"
+    finally:
+        del os.environ["MTG_S3_BUCKET"]
+
+
 def test_falls_back_to_common_safe_default():
     assert base_utils.get_secret("catalog_name") == "mtg_dev"
 
@@ -86,6 +96,7 @@ def test_producao_com_catalogo_injetado_passa():
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     test_explicit_default_wins()
+    test_s3_bucket_from_env_drops_scheme()
     test_falls_back_to_common_safe_default()
     test_falls_back_to_layer_specific_default()
     test_raises_when_no_default_available()

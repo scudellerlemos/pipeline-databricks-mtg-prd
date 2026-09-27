@@ -51,14 +51,26 @@ def config_override(secret_name):
     return os.environ.get("MTG_" + secret_name.upper()) or None
 
 
+def _bucket_sem_esquema(secret_name, value):
+    """s3_bucket sem "s3://" - os notebooks montam f"s3://{bucket}/...".
+
+    Espelho de base_utils._bucket_sem_esquema: o Stage nao importa base_utils,
+    e foi exatamente o Stage que caiu com "s3://s3://..." na primeira carga
+    de producao.
+    """
+    if secret_name == "s3_bucket" and value.startswith("s3://"):
+        return value[len("s3://"):]
+    return value
+
+
 def get_secret(secret_name, default_value=None):
     override = config_override(secret_name)
     if override:
         print(f"Config '{secret_name}' veio do ambiente: {override}")
-        return override
+        return _bucket_sem_esquema(secret_name, override)
 
     try:
-        return dbutils.secrets.get(scope="mtg-pipeline", key=secret_name)
+        return _bucket_sem_esquema(secret_name, dbutils.secrets.get(scope="mtg-pipeline", key=secret_name))
     except Exception:
         if default_value is not None:
             print(f"Segredo '{secret_name}' não encontrado, usando valor padrão")
