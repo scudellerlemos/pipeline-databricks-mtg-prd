@@ -113,13 +113,15 @@ def test_double_faced_card_falls_back_to_front_face():
     assert record["type"] == "Creature — Human Wizard // Creature — Human Insect"
 
 
-def test_reversible_card_sem_type_line_na_raiz_usa_a_frente():
-    # type nulo quebra o DQ de NME_TIPO_CARTA na Gold.
-    card = {"name": "X // X", "layout": "reversible_card", "id": "rev-1",
-            "card_faces": [{"type_line": "Legendary Creature — Elf"}, {"type_line": "Legendary Creature — Elf"}]}
+def test_reversible_card_sem_type_line_e_oracle_id_na_raiz_usa_a_frente():
+    # type ou oracle_id nulo quebra o DQ da Gold (NME_TIPO_CARTA, ID_ORACLE).
+    face = {"type_line": "Legendary Creature — Elf", "oracle_id": "orc-1"}
+    card = {"name": "X // X", "layout": "reversible_card", "id": "rev-1", "card_faces": [face, dict(face)]}
 
     to_card_record, _ = _load_functions(_fake_get_for([]))
-    assert to_card_record(card)["type"] == "Legendary Creature — Elf"
+    record = to_card_record(card)
+    assert record["type"] == "Legendary Creature — Elf"
+    assert record["oracle_id"] == "orc-1"
 
 
 def test_double_faced_card_empty_colors_not_treated_as_missing():

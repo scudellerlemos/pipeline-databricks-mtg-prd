@@ -135,8 +135,8 @@ def _to_card_record(card):
         "originalType": None,
         "legalities": json.dumps(legalities) if legalities is not None else None,
         "id": card.get("id"),
-        # oracle_id fica sempre na raiz, mesmo em DFC.
-        "oracle_id": card.get("oracle_id"),
+        # oracle_id fica na raiz, exceto em reversible_card, que só traz em card_faces.
+        "oracle_id": _face_fallback(card, "oracle_id"),
     }
 
 
