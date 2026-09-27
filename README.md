@@ -123,7 +123,7 @@ pipeline-databricks-mtg-dev/
 - **Dados**: Cartas, Sets, Preços de mercado (USD, EUR, TIX)
 - **Formato**: Parquet, em snapshots datados (`{ano}_{mes}_{dia}_{tabela}.parquet`)
 - **Estratégia de carga**: FULL LOAD por execução — a Scryfall não expõe incrementalidade real; o `{dia}` do nome do arquivo é sempre o dia da execução; em `sets` e `card_prices`, `{ano}_{mes}` vêm do `releaseDate`, com janela de anos — não há filtro incremental na origem
-- **Frequência**: Mensal (1ª segunda-feira do mês, 6h, `America/Sao_Paulo` — ver `MTG_PIPELINE` em `.github/DAGs/pipeline.yml`); reexecução pula arquivos já gravados com o mesmo nome (em `sets`/`card_prices` isso inclui execuções de outros meses no mesmo dia do mês - bug conhecido)
+- **Frequência**: Mensal (1ª segunda-feira do mês, 6h, `America/Sao_Paulo` — ver `MTG_PIPELINE` em `.github/DAGs/pipeline.yml`); reexecução no mesmo dia pula arquivos já gravados com o mesmo nome
 - **Controle de execução**: um JSON por run em `_control/{tabela}/{run_id}.json` (status, contagens, duração, erro)
 - **Resiliência**: retry com backoff em erros HTTP transitórios (429/5xx)
 

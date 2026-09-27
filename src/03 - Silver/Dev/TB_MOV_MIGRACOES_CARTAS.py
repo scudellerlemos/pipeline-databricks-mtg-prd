@@ -104,9 +104,6 @@ def transform_migrations_silver(df):
     Transformacao especifica para tabela Migracoes de Id de Cartas, via SQL
     (spark.sql sobre temp views) seguida da resolucao de cadeia em Python.
     """
-    if not df:
-        return None
-
     logger = logging.getLogger(__name__)
     logger.info("Iniciando transformacoes especificas para Migracoes de Id de Cartas...")
 
@@ -138,7 +135,7 @@ def transform_migrations_silver(df):
             metadata_id AS ID_CARTA_ASSOCIADA,
             metadata_lang AS COD_IDIOMA,
             metadata_name AS NME_CARTA_ASSOCIADA,
-            metadata_set_code AS COD_COLECAO_ASSOCIADA,
+            upper(metadata_set_code) AS COD_COLECAO_ASSOCIADA,
             metadata_oracle_id AS ID_ORACLE_ASSOCIADO,
             metadata_collector_number AS NUM_COLECIONADOR_ASSOCIADO,
             to_timestamp(ingestion_timestamp) AS DT_INGESTAO,

@@ -41,7 +41,7 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS 
 | QTD_CUSTO_MANA | float | Custo de mana convertido (CMC). Nulos -> 0. | Não |
 | COD_CORES | string | Cores da carta, sem colchete/aspas. 'Colorless' se vazio. | Não |
 | COD_IDENTIDADE_COR | string | Identidade de cor (formatos tipo Commander), sem colchete/aspas. | Não |
-| NME_TIPO_CARTA | string | Linha de tipo antes do '—' (supertipos + tipos), em Title_Case com '_' - ex.: 'Creature', 'Legendary_Creature', 'Artifact_Creature', 'Basic_Land'; qualquer Planeswalker vira 'Planeswalker'. Para achar todas as criaturas use LIKE '%Creature%'. | Não |
+| NME_TIPO_CARTA | string | Linha de tipo antes do '—' (supertipos + tipos), em Title_Case com '_' - ex.: 'Creature', 'Legendary_Creature', 'Artifact_Creature', 'Basic_Land'; qualquer Planeswalker vira 'Planeswalker'; 'NA' se ausente. Para achar todas as criaturas use LIKE '%Creature%'. | Não |
 | DESC_DETALHE_TIPO_CARTA | string | Subtipo/detalhe do tipo, quando a linha de tipo tem '—'; em Planeswalker, a linha de tipo inteira (ex.: `Legendary_Planeswalker__Jace`: o `—` some no `remover_acentos`, após `normalizar_valores`). 'NA' se não houver. | Não |
 | DESC_TIPOS | string | Tipos principais da carta. Sempre 'NA' hoje (a Stage grava `types` nulo). | Não |
 | DESC_SUBTIPOS | string | Sempre 'NA' hoje (campo legado da magicthegathering.io sem equivalente na Scryfall; a Stage grava None e a regra de nulo converte em 'NA'). | Não |

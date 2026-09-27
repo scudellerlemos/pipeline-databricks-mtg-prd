@@ -130,17 +130,17 @@ max_retries           # Tentativas de retry por request HTTP (padrão: 3)
 ```
 s3://{bucket}/{stage_prefix}/
 ├── cards/
-│   └── {year}_{month}_{day}_cards.parquet   # dia da execução no nome - evita pular o mês
+│   └── {year}_{month}_{YYYYMMDD}_cards.parquet   # data completa da execução no nome
 ├── sets/
-│   └── {year}_{month}_{day}_sets.parquet          # ano/mês do releaseDate, dia da execução: 1 arquivo por mês de lançamento
+│   └── {year}_{month}_{YYYYMMDD}_sets.parquet          # ano/mês do releaseDate + data da execução: 1 arquivo por mês de lançamento
 ├── card_prices/
-│   └── {year}_{month}_{day}_card_prices.parquet   # idem sets (releaseDate da impressão)
+│   └── {year}_{month}_{YYYYMMDD}_card_prices.parquet   # idem sets (releaseDate da impressão)
 ├── symbology/
-│   └── {year}_{month}_{day}_symbology.parquet     # partição por data de ingestão (sem coluna de data própria)
+│   └── {year}_{month}_{YYYYMMDD}_symbology.parquet     # partição por data de ingestão (sem coluna de data própria)
 ├── rulings/
-│   └── {year}_{month}_{day}_rulings.parquet       # partição por data de ingestão (published_at não é usado)
+│   └── {year}_{month}_{YYYYMMDD}_rulings.parquet       # partição por data de ingestão (published_at não é usado)
 ├── migrations/
-│   └── {year}_{month}_{day}_migrations.parquet    # partição por data de ingestão (performed_at não é usado)
+│   └── {year}_{month}_{YYYYMMDD}_migrations.parquet    # partição por data de ingestão (performed_at não é usado)
 └── _control/
     ├── cards/{run_id}.json
     ├── sets/{run_id}.json
@@ -156,13 +156,13 @@ Cada tabela tem sua própria pasta - antes os 6 arquivos viviam juntos num diret
 
 - **Nome de arquivo determinístico** — se o arquivo já existe, a run
   pula essa partição (`files_skipped`) em vez de sobrescrever. Os seis notebooks
-  usam o mesmo esquema via `save_to_parquet()`. `{day}` é só o dia do mês da
-  execução; `{year}_{month}` é a data da execução, exceto em `sets` e
-  `card_prices`, onde vem do `releaseDate`.
-- **Bug conhecido (`sets`/`card_prices`):** como o nome não carrega o mês da
-  execução, uma run em outro mês mas no mesmo dia do mês acha o arquivo antigo
-  e pula a partição (ex.: `2021_03_05_card_prices.parquet` gravado em 05/09
-  faz a run de 05/10 não coletar os preços dos lançamentos de mar/2021).
+  usam o mesmo esquema via `save_to_parquet()` (`parquet_file_name()`).
+  `{YYYYMMDD}` é a data completa da execução; `{year}_{month}` é a partição -
+  a data da execução, exceto em `sets` e `card_prices`, onde vem do
+  `releaseDate`. Com a data completa no nome, runs em meses diferentes nunca
+  colidem (antes só o dia do mês entrava no nome e, em `sets`/`card_prices`,
+  a run de 05/10 achava o arquivo de 05/09 e pulava a coleta). Arquivos
+  antigos, no formato só-dia, continuam válidos: a Bronze controla por caminho.
 - **`start_run()`/`finish_run()`** (`ingestion_utils.py`): o `start_run` monta o registro em memória e o `finish_run` grava um JSON por execução em
   `_control/{table}/{run_id}.json` com: `run_id`, `endpoint`, `params`, início/fim,
   duração, `files_written`/`files_skipped`/`records_written`, `status`

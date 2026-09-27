@@ -23,7 +23,7 @@ import uuid
 from datetime import datetime, timezone
 
 import requests
-from pyspark.sql.functions import col, lit, current_timestamp, year, month, when
+from pyspark.sql.functions import coalesce, col, lit, current_timestamp, year, month, when
 
 # ponytail: em Serverless + Git source, %run às vezes executa este arquivo num
 # namespace que não herda o `dbutils` implícito do notebook. Puxa do IPython
@@ -146,6 +146,10 @@ def as_float(valor):
     return float(valor) if valor is not None else None
 
 
+def parquet_file_name(partition_year, partition_month, run_date_str, table_name):
+    return f"{partition_year}_{partition_month:02d}_{run_date_str}_{table_name}.parquet"
+
+
 def _run_timestamp(run):
     """Carimbo unico da execucao, como literal Python.
 
@@ -176,8 +180,11 @@ def save_to_parquet(spark, data, table_name, base_path, schema=None,
     try:
         df = spark.createDataFrame(data, schema) if schema else spark.createDataFrame(data)
 
+        # `source` de origem (ex.: rulings traz 'wotc'/'scryfall' = quem emitiu)
+        # e preservado; so vira 'scryfall' quando a fonte nao traz o campo.
+        source = coalesce(col("source"), lit("scryfall")) if "source" in df.columns else lit("scryfall")
         df = df.withColumn("ingestion_timestamp", lit(_run_timestamp(run))) \
-               .withColumn("source", lit("scryfall")) \
+               .withColumn("source", source) \
                .withColumn("endpoint", lit(table_name))
 
         if partition_source_col and partition_source_col in df.columns:
@@ -198,7 +205,7 @@ def save_to_parquet(spark, data, table_name, base_path, schema=None,
             df = df.withColumn("partition_year", year(col("ingestion_timestamp"))) \
                    .withColumn("partition_month", month(col("ingestion_timestamp")))
 
-        run_date_str = datetime.now().strftime("%d")
+        run_date_str = _run_timestamp(run).strftime("%Y%m%d")
         partition_combinations = df.select("partition_year", "partition_month").distinct().collect()
 
         for partition_row in partition_combinations:
@@ -209,10 +216,12 @@ def save_to_parquet(spark, data, table_name, base_path, schema=None,
                 (col("partition_year") == partition_year) & (col("partition_month") == partition_month)
             )
 
-            # Nome inclui o dia da execução para permitir um arquivo por run diário
-            # (senão o check de "arquivo já existe" abaixo pularia o mês inteiro).
+            # Nome = partição + data COMPLETA da execução (YYYYMMDD): um arquivo
+            # por run diário. Só o dia do mês colidia entre meses em sets/
+            # card_prices (partição por releaseDate): a run de 05/10 achava o
+            # arquivo de 05/09 e pulava a partição.
             # Cada tabela grava na sua própria pasta em base_path/{table_name}/.
-            file_name = f"{partition_year}_{partition_month:02d}_{run_date_str}_{table_name}.parquet"
+            file_name = parquet_file_name(partition_year, partition_month, run_date_str, table_name)
             file_path = f"{base_path}/{table_name}/{file_name}"
 
             try:

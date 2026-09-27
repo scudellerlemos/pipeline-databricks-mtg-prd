@@ -131,9 +131,9 @@ BRONZE_TABLES = {
         "columns": {
             "oracle_id": "Oracle id da carta a que esta ruling se aplica (mesmo valor para todas as impressões da carta).",
             # Sobrescreve o COMMON_COLUMNS["source"] genérico: a ruling da
-            # Scryfall traz seu próprio "source" (wotc/scryfall), mas o
-            # save_to_parquet da Stage sobrescreve com lit("scryfall").
-            "source": "Sempre 'scryfall'. BUG CONHECIDO: a ruling de origem traz quem a emitiu ('wotc' ou 'scryfall'), mas o save_to_parquet da Stage sobrescreve a coluna com 'scryfall' e o valor original se perde.",
+            # Scryfall traz seu próprio "source" (wotc/scryfall), que o
+            # save_to_parquet da Stage preserva.
+            "source": "Quem emitiu a ruling ('wotc' ou 'scryfall') - não é a fonte de linhagem. Partições gravadas antes da correção têm sempre 'scryfall' (a Stage sobrescrevia a coluna).",
             "published_at": "Data de publicação da ruling.",
             "comment": "Texto da ruling / esclarecimento de regras.",
         },

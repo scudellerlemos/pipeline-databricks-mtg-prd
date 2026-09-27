@@ -86,7 +86,7 @@ SETS_SCHEMA = StructType(
 # Campos exclusivos da magicthegathering.io (border/mkm_id/mkm_name/gathererCode/
 # magicCardsInfoCode/oldCode/source/booster/booster_N) sem equivalente na Scryfall
 # - ver _to_set_record(). Continuam None pra sempre (exceto `source`, que o
-# save_to_parquet sobrescreve com 'scryfall'): a Silver (TB_DIM_COLECOES) lê e
+# save_to_parquet preenche com 'scryfall' quando vem nulo): a Silver (TB_DIM_COLECOES) lê e
 # renomeia essas colunas (exceto `booster`, mantida só pelo schema), então elas não podem sumir do schema, mesmo
 # nunca tendo dado de origem (README.md - "Imutabilidade").
 _FIELDS_SEM_EQUIVALENTE_SCRYFALL = (

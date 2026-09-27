@@ -64,11 +64,9 @@ execução.
 de preço tem uma coleta por execução agendada (mensal) — mais nas publicações
 com código novo
 ([ADR-011](#adr-011--publicação-com-código-novo-roda-o-pipeline-de-prd)).
-Exceção conhecida: em `sets` e `card_prices` o nome do arquivo só tem o dia da
-execução (ano/mês vêm do `releaseDate`), então duas execuções em meses
-diferentes no mesmo dia do mês colidem e a segunda pula a coleta (ex.:
-2027-02-01 e 2027-03-01, ambas 1ª segunda-feira). Se
-precisar de diária, é só mudar o cron.
+O nome do arquivo carrega a data completa da execução (`YYYYMMDD`), então
+execuções em meses diferentes não colidem - nem em `sets`/`card_prices`, cujo
+ano/mês vem do `releaseDate`. Se precisar de diária, é só mudar o cron.
 
 ## ADR-003 — Bronze append-only, Silver e Gold com MERGE
 
@@ -80,7 +78,7 @@ por curiosidade — sem duplicar dado.
   `source_file` ainda não está na tabela. Nada é deduplicado nem sobrescrito:
   a Bronze é o histórico bruto.
 - **Silver** e **Gold** deduplicam a origem pela chave de negócio (`row_number`
-  na Silver quando há coluna de ordenação, senão `dropDuplicates`; `dropDuplicates` na Gold) e gravam com merge do Delta (`DeltaTable.merge`) por essa
+  na Silver quando há coluna de ordenação, senão `dropDuplicates`; na Gold, chave duplicada no lote aborta a run) e gravam com merge do Delta (`DeltaTable.merge`) por essa
   chave. Na primeira carga, sem tabela ainda, é `overwrite`.
 
 **Consequências.** Toda camada é idempotente, o que viabiliza a [ADR-011](#adr-011--publicação-com-código-novo-roda-o-pipeline-de-prd)

@@ -83,7 +83,10 @@ def _to_price_record(card):
     # tentar casar com os arquivos de `cards` já gravados no S3 - esse join
     # (1:1 por id da impressão) fica pra Gold, não pra Stage.
     prices = card.get("prices", {}) or {}
-    image_uris = card.get("image_uris")
+    # Dupla face (DFC) não tem image_uris na raiz - só em card_faces[0]
+    # (frente), mesmo fallback de cards.py.
+    faces = card.get("card_faces") or [{}]
+    image_uris = card.get("image_uris") or faces[0].get("image_uris")
     return {
         "id": card.get("id"),
         "name": card.get("name"),

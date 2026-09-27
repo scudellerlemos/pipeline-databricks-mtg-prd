@@ -70,9 +70,6 @@ def transform_sets_silver(df):
     """
     Transformação específica para tabela Coleções, via SQL (spark.sql sobre temp views)
     """
-    if not df:
-        return None
-
     logger = logging.getLogger(__name__)
     logger.info("Iniciando transformações específicas para Coleções...")
 
@@ -107,7 +104,7 @@ def transform_sets_silver(df):
             oldCode AS COD_ANTIGO,
             {online_only_select},
             card_count AS QTD_CARTAS,
-            parent_set_code AS COD_COLECAO_PAI,
+            upper(parent_set_code) AS COD_COLECAO_PAI,
             block AS NME_BLOCO,
             icon_svg_uri AS URL_ICONE,
             {booster_cols_select},
@@ -163,6 +160,7 @@ processor.save_silver_table(
     df_silver,
     partition_cols=["ANO_LANCAMENTO", "MES_LANCAMENTO"],
     key_column="COD_COLECAO",
+    order_by_col="DT_INGESTAO",
     table_comment=get_table_comment("TB_DIM_COLECOES"),
     column_comments=get_column_comments("TB_DIM_COLECOES")
 )

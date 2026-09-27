@@ -16,8 +16,8 @@ TB_FATO_CARTAS por run. Não há fan-out: carta e preço estão no mesmo grão d
 impressão e cada cotação casa com uma só carta por ID_CARTA. Esclarecimentos e
 migrações são agregados antes do join pelo mesmo motivo; coleções já têm 1
 linha por COD_COLECAO. Se mesmo assim (ID_CARTA, DT_COTACAO) repetir, o
-save_to_gold (gold_utils.py) descarta a repetição com dropDuplicates antes de
-gravar - silenciosamente.
+save_to_gold (gold_utils.py) aborta antes de gravar - duplicata aqui é bug
+a montante, não dado a descartar.
 
 VLR_USD/EUR/TIX são o preço DAQUELA impressão, não do nome da carta - uma
 reimpressão barata e um original caro são linhas distintas com valores
@@ -49,8 +49,7 @@ TABELAS SILVER USADAS (5 de 7):
   uma migracao"). Agregada ANTES do join (1 linha por ID_CARTA_ANTIGO, mais
   recente vence por DT_EXECUCAO/ID_MIGRACAO) porque a mesma carta pode ter
   mais de um evento de migração na Silver - sem agregar, o LEFT JOIN direto
-  faria fan-out e duplicaria linhas da Gold (o dropDuplicates do
-  save_to_gold ficaria com uma delas, arbitrária).
+  faria fan-out e duplicaria linhas da Gold (e o save_to_gold abortaria).
 
 TABELAS SILVER *NÃO* USADAS (2 de 7) - desvio deliberado, documentado:
 - TB_DOM_SIMBOLOS: lista de referência de símbolos de mana individuais
@@ -170,7 +169,7 @@ def transform_mercado_cartas_gold(df_cartas, df_colecoes, df_precos, df_esclarec
 
     # 1 linha por ID_CARTA_ANTIGO (a carta pode ter mais de 1 evento de
     # migracao na Silver) - sem isso o LEFT JOIN abaixo faria fan-out e o
-    # dropDuplicates do save_to_gold ficaria com uma migracao arbitraria.
+    # save_to_gold abortaria por chave duplicada.
     spark.sql("""
         CREATE OR REPLACE TEMP VIEW _migracoes_resolvidas AS
         SELECT ID_CARTA_ANTIGO, ID_CARTA_CANONICO
@@ -234,62 +233,56 @@ setup_unity_catalog(config['catalog_name'], config['schema_gold'])
 # COMMAND ----------
 
 # =============================================================================
-# AUDITORIA - INICIO DO RUN
+# PROCESSAMENTO, DATA QUALITY E AUDITORIA
 # =============================================================================
+# Uma célula só, com um try/finally: toda run grava 1 linha de auditoria,
+# inclusive a que aborta no DQ pré-join (dentro do transform), na validação de
+# PK (save_gold_table) ou por erro inesperado - antes, só a run que chegava ao
+# DQ pós-carga deixava rastro, e o status FALHA_DQ_PK nunca era gravado.
 audit_run = start_audit_run()
 audit_status = "SUCESSO"
-
-# COMMAND ----------
-
-# =============================================================================
-# PROCESSAMENTO USANDO GOLD_UTILS
-# =============================================================================
+dq_resultados = {}
+qtd_lidos = 0
+qtd_processados = 0
+full_table_name = f"{config['catalog_name']}.{config['schema_gold']}.TB_FATO_MERCADO_CARTAS"
 processor = GoldTableProcessor("TB_FATO_MERCADO_CARTAS", config)
 
-df_cartas = processor.extract_from_silver("TB_FATO_CARTAS")
-df_colecoes = processor.extract_from_silver("TB_DIM_COLECOES")
-df_precos = processor.extract_from_silver("TB_FATO_PRECOS_CARTAS")
-df_esclarecimentos = processor.extract_from_silver("TB_FATO_ESCLARECIMENTOS_CARTAS")
-df_migracoes = processor.extract_from_silver("TB_MOV_MIGRACOES_CARTAS")
-
-qtd_lidos = (
-    df_cartas.count() + df_colecoes.count() + df_precos.count()
-    + df_esclarecimentos.count() + df_migracoes.count()
-)
-
-df_gold = transform_mercado_cartas_gold(df_cartas, df_colecoes, df_precos, df_esclarecimentos, df_migracoes)
-qtd_processados = df_gold.count()
-
 try:
-    processor.save_gold_table(
-        df_gold,
-        partition_cols=["ANO_COTACAO", "MES_COTACAO"],
-        key_column=["ID_CARTA", "DT_COTACAO"],
-        table_comment=get_table_comment("TB_FATO_MERCADO_CARTAS"),
-        column_comments=get_column_comments("TB_FATO_MERCADO_CARTAS")
+    df_cartas = processor.extract_from_silver("TB_FATO_CARTAS")
+    df_colecoes = processor.extract_from_silver("TB_DIM_COLECOES")
+    df_precos = processor.extract_from_silver("TB_FATO_PRECOS_CARTAS")
+    df_esclarecimentos = processor.extract_from_silver("TB_FATO_ESCLARECIMENTOS_CARTAS")
+    df_migracoes = processor.extract_from_silver("TB_MOV_MIGRACOES_CARTAS")
+
+    qtd_lidos = (
+        df_cartas.count() + df_colecoes.count() + df_precos.count()
+        + df_esclarecimentos.count() + df_migracoes.count()
     )
-except RuntimeError:
-    audit_status = "FALHA_DQ_PK"
-    raise
 
-# COMMAND ----------
+    df_gold = transform_mercado_cartas_gold(df_cartas, df_colecoes, df_precos, df_esclarecimentos, df_migracoes)
+    qtd_processados = df_gold.count()
 
-# =============================================================================
-# DATA QUALITY (pós-carga) E AUDITORIA - FIM DO RUN
-# =============================================================================
-full_table_name = f"{config['catalog_name']}.{config['schema_gold']}.TB_FATO_MERCADO_CARTAS"
+    try:
+        processor.save_gold_table(
+            df_gold,
+            partition_cols=["ANO_COTACAO", "MES_COTACAO"],
+            key_column=["ID_CARTA", "DT_COTACAO"],
+            table_comment=get_table_comment("TB_FATO_MERCADO_CARTAS"),
+            column_comments=get_column_comments("TB_FATO_MERCADO_CARTAS")
+        )
+    except RuntimeError:
+        audit_status = "FALHA_DQ_PK"
+        raise
 
-dq_resultados = {}
-try:
+    # DATA QUALITY (pós-carga)
     dq_resultados = run_data_quality_checks(spark, full_table_name, {
         # Chave do fato vinda direto da Silver, sem COALESCE. Linha sem
         # ID_ORACLE (vem de TB_FATO_CARTAS) é fato sem chave - não existe
         # valor tolerável.
         "fk_null_id_oracle": f"SELECT COUNT(*) FROM {full_table_name} WHERE ID_ORACLE IS NULL",
 
-        # NME_COLECAO/NME_BLOCO passam por COALESCE; os demais vêm da Silver.
-        # NULL aqui = dado faltando na origem (ex.: carta sem type_line) ou
-        # regra de nulo falhando - vale olhar antes de seguir.
+        # NME_COLECAO/NME_BLOCO passam por COALESCE; os demais vêm da Silver
+        # já com 'NA' no lugar de nulo. NULL aqui = regra de nulo falhando.
         "null_residual_categorico": f"""SELECT COUNT(*) FROM {full_table_name}
             WHERE NME_CARTA IS NULL OR NME_TIPO_CARTA IS NULL OR NME_RARIDADE IS NULL
                OR NME_CATEGORIA_COR IS NULL OR COD_CORES IS NULL
@@ -316,19 +309,23 @@ try:
         ),
     })
 except DataQualityError as erro_dq:
+    # Pré-join ou pós-carga: resultados do DQ que estourou vão pra auditoria.
     audit_status = "FALHA_DQ"
     dq_resultados = erro_dq.resultados
     raise
+except Exception:
+    if audit_status == "SUCESSO":
+        audit_status = "FALHA"
+    raise
 finally:
-    # finally e nao depois do try: sem isso a run que aborta no DQ pos-carga nao deixa
-    # linha de auditoria nenhuma, e a unica prova do que aconteceu vira o log
-    # do cluster - que nao sobrevive ao fim do job.
+    # finally: a unica prova do que aconteceu numa run abortada nao pode
+    # ser o log do cluster - que nao sobrevive ao fim do job.
     record_gold_audit(
         spark, config['catalog_name'], config['schema_gold'], "TB_FATO_MERCADO_CARTAS",
         audit_run,
         qtd_lidos=qtd_lidos,
         qtd_processados=qtd_processados,
-        qtd_inseridos_atualizados=qtd_processados,
+        qtd_inseridos_atualizados=qtd_processados if audit_status in ("SUCESSO", "FALHA_DQ") else 0,
         dq_resultados=dq_resultados,
         status=audit_status
     )

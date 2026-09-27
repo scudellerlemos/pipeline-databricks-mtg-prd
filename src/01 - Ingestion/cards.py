@@ -119,7 +119,8 @@ def _to_card_record(card):
         "cmc": as_float(card.get("cmc")),
         "colors": json.dumps(colors) if colors is not None else None,
         "colorIdentity": json.dumps(color_identity) if color_identity is not None else None,
-        "type": card.get("type_line"),
+        # reversible_card não tem type_line na raiz, só nas faces
+        "type": _face_fallback(card, "type_line"),
         # sem equivalente na Scryfall (campos legados da magicthegathering.io)
         "types": None,
         "subtypes": None,

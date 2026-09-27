@@ -77,9 +77,6 @@ def transform_card_prices_silver(df):
     Transformacao especifica para tabela Precos de Cartas, via SQL
     (spark.sql sobre temp views).
     """
-    if not df:
-        return None
-
     logger = logging.getLogger(__name__)
     logger.info("Iniciando transformacoes especificas para Precos de Cartas...")
 

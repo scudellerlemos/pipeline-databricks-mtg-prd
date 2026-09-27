@@ -79,9 +79,6 @@ def transform_symbology_silver(df):
     Transformacao especifica para tabela Simbolos de Mana, via SQL
     (spark.sql sobre temp views).
     """
-    if not df:
-        return None
-
     logger = logging.getLogger(__name__)
     logger.info("Iniciando transformacoes especificas para Simbolos de Mana...")
 
@@ -153,6 +150,7 @@ df_silver = processor.transform_data(df_bronze, transform_symbology_silver)
 processor.save_silver_table(
     df_silver,
     key_column="COD_SIMBOLO",
+    order_by_col="DT_INGESTAO",
     table_comment=get_table_comment("TB_DOM_SIMBOLOS"),
     column_comments=get_column_comments("TB_DOM_SIMBOLOS")
 )

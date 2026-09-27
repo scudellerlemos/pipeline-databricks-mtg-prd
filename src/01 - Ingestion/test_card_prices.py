@@ -96,7 +96,8 @@ def test_double_faced_card_keeps_combined_name_as_is():
         "name": "Brightglass Gearhulk // Brightglass Gearhulk", "set": "eoe", "rarity": "mythic",
         "released_at": "2025-07-25",
         "prices": {"usd": "3.50", "eur": None, "tix": None},
-        "scryfall_uri": "https://scryfall.com/y", "image_uris": None,
+        "scryfall_uri": "https://scryfall.com/y",
+        "card_faces": [{"image_uris": {"normal": "https://img/frente.jpg"}}, {}],
     }]
 
     _, fetch_price_records = _load_functions(_fake_get_for(cards))
@@ -104,7 +105,8 @@ def test_double_faced_card_keeps_combined_name_as_is():
 
     assert records[0]["name"] == "Brightglass Gearhulk // Brightglass Gearhulk"
     assert records[0]["usd"] == "3.50"
-    assert records[0]["image_url"] is None
+    # DFC não tem image_uris na raiz: cai pra frente (card_faces[0])
+    assert records[0]["image_url"] == "https://img/frente.jpg"
 
 
 def test_reimpressoes_do_mesmo_nome_viram_linhas_com_precos_proprios():

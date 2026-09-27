@@ -20,7 +20,7 @@ if "pyspark" not in sys.modules:
     pyspark_sql = types.ModuleType("pyspark.sql")
     pyspark_sql_functions = types.ModuleType("pyspark.sql.functions")
     pyspark_sql_types = types.ModuleType("pyspark.sql.types")
-    for name in ("col", "lit", "current_timestamp", "year", "month", "when"):
+    for name in ("coalesce", "col", "lit", "current_timestamp", "year", "month", "when"):
         setattr(pyspark_sql_functions, name, lambda *a, **k: None)
     for name in ("StructType", "StructField", "StringType", "IntegerType", "FloatType"):
         setattr(pyspark_sql_types, name, lambda *a, **k: None)
@@ -257,6 +257,15 @@ def test_env_var_sobrescreve_o_prefixo_de_stage():
         del os.environ["MTG_S3_STAGE_PREFIX"]
 
 
+def test_nome_do_parquet_nao_colide_entre_meses_no_mesmo_dia():
+    # sets/card_prices particionam por releaseDate: com so o dia do mes no
+    # nome, a run de 05/10 achava o arquivo de 05/09 e pulava a particao.
+    setembro = ingestion_utils.parquet_file_name(2021, 3, "20260905", "card_prices")
+    outubro = ingestion_utils.parquet_file_name(2021, 3, "20261005", "card_prices")
+    assert setembro == "2021_03_20260905_card_prices.parquet"
+    assert setembro != outubro
+
+
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     test_http_get_with_retry_returns_response_on_success()
@@ -274,4 +283,5 @@ if __name__ == "__main__":
     test_run_stage_ingestion_exception_marks_failed_and_reraises()
     test_run_timestamp_e_constante_entre_chamadas()
     test_env_var_sobrescreve_o_prefixo_de_stage()
+    test_nome_do_parquet_nao_colide_entre_meses_no_mesmo_dia()
     print("OK")

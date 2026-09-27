@@ -57,21 +57,6 @@ except NameError:
 # ============================================================================
 # FUNÇÕES DE CONFIGURAÇÃO
 # ============================================================================
-def get_standard_config():
-    """Retorna configuração padrão para scripts Gold com valores padrão seguros"""
-    defaults = {
-        'catalog_name': 'mtg_dev',
-        's3_bucket': 's3://meu-bucket-default',
-        's3_gold_prefix': 'gold'
-    }
-
-    config = {key: get_secret(key, extra_safe_defaults=defaults) for key in defaults}
-
-    config['schema_silver'] = "silver"
-    config['schema_gold'] = "gold"
-
-    return config
-
 def create_manual_config(catalog_name, s3_bucket, s3_gold_prefix=None):
     """
     Cria configuração manual sem usar secrets (para testes/desenvolvimento)
@@ -221,10 +206,17 @@ def save_to_gold(df_final, catalog, schema, table_name, s3_gold_path,
 
     if key_column:
         key_cols = [key_column] if isinstance(key_column, str) else list(key_column)
-        # Dedup por key_column ANTES da 1a carga (sem MERGE pra dedupar): mesma
-        # razão de save_to_silver - dado duplicado na 1a carga vira duplicata
-        # permanente na tabela.
-        df_final = df_final.dropDuplicates(key_cols)
+        # A chave da Gold é única por construção do join - duplicata no lote
+        # é bug a montante (PK da Silver quebrada, join que multiplicou). Aborta
+        # ANTES de gravar em vez de descartar em silêncio: dropDuplicates
+        # escolheria uma linha qualquer e esconderia o bug.
+        dup_count = df_final.groupBy(*key_cols).count().filter("count > 1").count()
+        if dup_count > 0:
+            raise RuntimeError(
+                f"Lote de {full_table_name} tem {dup_count} chave(s) "
+                f"({', '.join(key_cols)}) duplicada(s) - nada foi gravado. "
+                f"Corrija a fonte/transformação."
+            )
 
     files_exist = DeltaTable.isDeltaTable(spark_session, delta_path)
 
@@ -363,9 +355,9 @@ def record_gold_audit(spark_session, catalog, schema, table_name, audit_run,
                        dq_resultados, status):
     """
     Fecha o run de auditoria e grava 1 linha em `{catalog}.{schema}.TB_AUDITORIA_GOLD`
-    (criada automaticamente na 1a chamada). 1 linha por execução de notebook Gold
-    que chega ao DQ pós-carga (abort antes disso não passa por aqui),
-    nunca é atualizada depois de gravada (log de execução, não estado).
+    (criada automaticamente na 1a chamada). 1 linha por execução de notebook Gold,
+    inclusive as que abortam (o notebook chama isto num finally), nunca é
+    atualizada depois de gravada (log de execução, não estado).
     """
     dt_fim = datetime.now()
     duracao_segundos = (dt_fim - audit_run["dt_inicio"]).total_seconds()
@@ -412,9 +404,9 @@ def record_gold_audit(spark_session, catalog, schema, table_name, audit_run,
 class GoldTableProcessor:
     """Classe para processar tabelas Gold com padrões comuns"""
 
-    def __init__(self, table_name, config=None):
+    def __init__(self, table_name, config):
         self.table_name = table_name
-        self.config = config or get_standard_config()
+        self.config = config
         self.spark = get_spark_session()
         self.s3_gold_path = f"{self.config['s3_bucket']}/{self.config['s3_gold_prefix']}"
 

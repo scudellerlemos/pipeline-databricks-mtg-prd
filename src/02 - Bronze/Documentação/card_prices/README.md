@@ -35,5 +35,5 @@ Além das [colunas técnicas comuns](../README.md#colunas-técnicas-comuns):
 | `eur_foil` | Preço em euros da variante foil da mesma impressão. Nulo quando a impressão não tem foil. |
 | `tix` | Preço em MTGO tickets, como veio da fonte. |
 | `scryfall_uri` | URL da página da carta na Scryfall. |
-| `image_url` | URL da imagem da carta. Nulo em cartas de dupla face (a Stage lê só `image_uris` da raiz, sem o fallback pra `card_faces[0]` de `cards.imageUrl`). |
+| `image_url` | URL da imagem da carta. Em dupla face usa a imagem da frente (`card_faces[0]`), mesmo fallback de `cards.imageUrl`. |
 | `releaseDate` | Data de lançamento da impressão/set desta carta. |

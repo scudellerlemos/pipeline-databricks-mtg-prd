@@ -32,13 +32,13 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS,
 ## 6. Schema Detalhado
 | Nome da Coluna | Tipo | Descrição | Chave |
 |---|---|---|---|
-| ID_ESCLARECIMENTO | string | Id surrogate (hash SHA-256 determinístico sobre os valores crus da Bronze: oracle_id, source antes da tradução wotc/scryfall, to_date(published_at) e comment antes da troca de ( ) { } por [ ] - não dá pra recalcular a partir das colunas Silver). A fonte não traz id próprio de registro. | Sim |
+| ID_ESCLARECIMENTO | string | Id surrogate (hash SHA-256 determinístico sobre os valores crus da Bronze: oracle_id, to_date(published_at) e comment antes da troca de ( ) { } por [ ] - não dá pra recalcular a partir das colunas Silver; o emissor fica fora, ver seção de chave). A fonte não traz id próprio de registro. | Sim |
 | ID_ORACLE | string | Oracle id da carta a que este esclarecimento se refere (estável entre impressões). FK para `TB_FATO_CARTAS.ID_ORACLE`. | Não |
-| NME_EMISSOR | string | Quem publicou o esclarecimento. **Bug conhecido:** hoje é sempre 'Scryfall' - a Stage sobrescreve `source` com a fonte de linhagem (`ingestion_utils.py`), então o emissor original ('wotc'/'scryfall') se perde antes da Silver. | Não |
+| NME_EMISSOR | string | Quem publicou o esclarecimento ('Wizards'/'Scryfall'), vindo de `source` da Bronze. | Não |
 | DT_PUBLICACAO | date | Data de publicação do esclarecimento. | Não |
 | DESC_ESCLARECIMENTO | string | Texto do esclarecimento, notação `[..]`. 'NA' se ausente. | Não |
 | DT_INGESTAO | timestamp | Início da execução da Stage que gravou o registro (mesmo valor em todas as linhas da run). | Não |
-| NME_FONTE | string | Fonte de dados de origem ('Scryfall'). 'NA' se ausente. Lida da mesma coluna `source` que `NME_EMISSOR`. | Não |
+| NME_FONTE | string | Fonte de dados de origem ('Scryfall'). Literal: nesta tabela `source` é o emissor, não a linhagem. | Não |
 | DESC_URL_ORIGEM | string | Nome lógico da tabela de origem na Stage (sempre `rulings`), não a URL da API. | Não |
 | DESC_ARQUIVO_ORIGEM | string | Caminho do arquivo Parquet de origem na Stage. | Não |
 | ID_EXECUCAO_BRONZE | string | Id da execução da Bronze que gravou a linha. | Não |
@@ -47,13 +47,13 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS,
 | MES_PUBLICACAO | int | Mês derivado de DT_PUBLICACAO (partição física). | Não |
 
 ## 7. Chave Única
-`ID_ESCLARECIMENTO`. Id surrogate: a Bronze `rulings` não traz um id próprio de registro (Scryfall só garante `oracle_id` + `source` + `published_at` + `comment`) - gerado por hash determinístico (`sha2(concat_ws('|', ...), 256)`) sobre essas 4 colunas, garantindo o mesmo id em reprocessamentos do mesmo dado e permitindo declarar `PRIMARY KEY` real (coluna sempre NOT NULL).
+`ID_ESCLARECIMENTO`. Id surrogate: a Bronze `rulings` não traz um id próprio de registro (Scryfall só garante `oracle_id` + `source` + `published_at` + `comment`) - gerado por hash determinístico (`sha2(concat_ws('|', ...), 256)`) sobre `oracle_id` + `published_at` + `comment`, garantindo o mesmo id em reprocessamentos do mesmo dado e permitindo declarar `PRIMARY KEY` real (coluna sempre NOT NULL). `source` (emissor) fica fora do hash: partições antigas da Bronze têm `source='scryfall'` (a Stage sobrescrevia a coluna) e as novas o emissor real - com ele no hash, o mesmo esclarecimento viraria duas linhas; sem ele, o merge por `DT_INGESTAO` mais recente corrige o emissor.
 
 ## 8. Regras de Implementação
 - **Filtro temporal:** não aplicado (histórico de esclarecimentos é útil por completo).
 - **Merge incremental:** por `ID_ESCLARECIMENTO`, desempate por `DT_INGESTAO` mais recente.
 - **Particionamento:** por `ANO_PUBLICACAO` e `MES_PUBLICACAO`.
-- **Tradução de `NME_EMISSOR`:** `'wotc'` -> `'Wizards'`, `'scryfall'` -> `'Scryfall'`, demais valores em Title Case. **Bug conhecido:** como a Stage sobrescreve `source` com `'scryfall'` em toda tabela, o ramo `'wotc'` nunca é atingido e o valor gravado é sempre `'Scryfall'`.
+- **Tradução de `NME_EMISSOR`:** `'wotc'` -> `'Wizards'`, `'scryfall'` -> `'Scryfall'`, demais valores em Title Case.
 - **Regra "sem `( ) { } no dado Silver"`:** `DESC_ESCLARECIMENTO` converte `{...}`/`(...)` para `[...]`, mesma regra de `TB_FATO_CARTAS`.
 
 ## 9. Histórico de Alterações

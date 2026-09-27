@@ -19,7 +19,7 @@ GOLD_TABLES = {
             "ID_CARTA": "Id único da impressão/edição desta carta.",
             "ID_ORACLE": "Identificador da carta estável entre todas as suas impressões - use para agrupar todas as versões de uma carta independente da edição.",
             "NME_CARTA": "Nome da carta, normalizado (Title_Case sem acento, espaço vira '_'; ex.: 'Lightning_Bolt').",
-            "NME_TIPO_CARTA": "Linha de tipo antes do '—' (supertipos + tipos), em Title_Case com '_' - ex.: 'Creature', 'Legendary_Creature', 'Artifact_Creature', 'Basic_Land'; qualquer Planeswalker vira 'Planeswalker'. Para achar todas as criaturas use LIKE '%Creature%'.",
+            "NME_TIPO_CARTA": "Linha de tipo antes do '—' (supertipos + tipos), em Title_Case com '_' - ex.: 'Creature', 'Legendary_Creature', 'Artifact_Creature', 'Basic_Land'; qualquer Planeswalker vira 'Planeswalker'; 'NA' se ausente. Para achar todas as criaturas use LIKE '%Creature%'.",
             "NME_RARIDADE": "Raridade desta impressão da carta.",
             "NME_CATEGORIA_COR": "Categoria de cor da carta (Colorless, Mono, Dual_Color, Multicolor) - facilita agrupar cartas por perfil de cor.",
             "COD_CORES": "Cores da carta como letras WUBRG separadas por vírgula (ex.: 'W, U'); 'Colorless' quando a carta não tem cor (nunca NULO/vazio).",

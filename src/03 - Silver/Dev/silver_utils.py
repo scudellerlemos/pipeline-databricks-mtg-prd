@@ -64,21 +64,6 @@ except NameError:
 # ============================================================================
 # FUNÇÕES DE CONFIGURAÇÃO
 # ============================================================================
-def get_standard_config():
-    """Retorna configuração padrão para scripts Silver com valores padrão seguros"""
-    defaults = {
-        'catalog_name': 'mtg_dev',
-        's3_bucket': 's3://meu-bucket-default',
-        's3_silver_prefix': 'silver'
-    }
-
-    config = {key: get_secret(key, extra_safe_defaults=defaults) for key in defaults}
-
-    config['schema_bronze'] = "bronze"
-    config['schema_silver'] = "silver"
-
-    return config
-
 def create_manual_config(catalog_name, s3_bucket, s3_silver_prefix=None):
     """
     Cria configuração manual sem usar secrets (para testes/desenvolvimento)
@@ -366,9 +351,9 @@ def save_to_silver(df_final, catalog, schema, table_name, s3_silver_path,
 class SilverTableProcessor:
     """Classe para processar tabelas Silver com padrões comuns"""
 
-    def __init__(self, table_name, config=None):
+    def __init__(self, table_name, config):
         self.table_name = table_name
-        self.config = config or get_standard_config()
+        self.config = config
         self.spark = get_spark_session()
         self.s3_silver_path = f"{self.config['s3_bucket']}/{self.config['s3_silver_prefix']}"
 

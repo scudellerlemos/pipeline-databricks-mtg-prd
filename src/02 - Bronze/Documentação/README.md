@@ -45,7 +45,7 @@ Stage (comuns a toda fonte, preservadas 1:1 como o resto do dado):
 | Coluna | Adicionada por | Descrição |
 |---|---|---|
 | `ingestion_timestamp` | Stage | Início da execução da Stage que gravou o registro (mesmo valor em todas as linhas da run) - distinto do `bronze_ingestion_timestamp`. |
-| `source` | Stage | Nome da fonte de dados de origem (ex.: `scryfall`). Em `rulings` a fonte traz um `source` de negócio (`wotc`/`scryfall`), mas a Stage o sobrescreve com `scryfall` (bug conhecido) - ver [`rulings/README.md`](./rulings/README.md). |
+| `source` | Stage | Nome da fonte de dados de origem (ex.: `scryfall`). Em `rulings` a fonte traz um `source` de negócio (`wotc`/`scryfall`), que a Stage preserva - ver [`rulings/README.md`](./rulings/README.md). |
 | `endpoint` | Stage | Nome da tabela/endpoint lógico gravado pela Stage (= nome da tabela, ex.: `cards`), não a URL da API. |
 | `source_file` | Bronze | Caminho completo do arquivo Parquet de origem na Stage (`_metadata.file_path`) - é a chave de idempotência: um arquivo só é lido de novo se seu `source_file` ainda não existir na tabela Bronze. |
 | `bronze_run_id` | Bronze | Id da execução da Bronze que gravou a linha (controle de execução). |
@@ -65,9 +65,7 @@ se ela não existir. Toda execução segue o mesmo fluxo:
 6. Grava o controle de execução em `{s3_bronze_path}/_control/{tabela}/{run_id}.json`.
 
 Se não há arquivo novo (ex.: 2ª execução no mesmo dia - a Stage pula a
-escrita porque o nome do arquivo já carrega o dia da execução; em
-`sets`/`card_prices` isso também acontece no mesmo dia do mês em outro mês, ver
-o bug conhecido no README da Ingestion), a run fecha como `SUCCESS` sem escrever nada -
+escrita porque o nome do arquivo já carrega a data da execução), a run fecha como `SUCCESS` sem escrever nada -
 idempotência por identidade de arquivo, não por `SELECT DISTINCT` em dado de
 negócio.
 

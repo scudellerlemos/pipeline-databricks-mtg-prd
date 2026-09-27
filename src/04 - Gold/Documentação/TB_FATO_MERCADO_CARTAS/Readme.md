@@ -24,10 +24,10 @@ Visão única de mercado de cartas de Magic: The Gathering - combina catálogo d
 - `ID_CARTA_CANONICO` nunca é NULO - cai no próprio `ID_CARTA` quando não há migração.
 
 ## 6. Carga
-Full extract da Silver a cada execução; primeira carga `overwrite`, depois merge idempotente (`DeltaTable.merge()` com `withSchemaEvolution()`, dedup por `dropDuplicates`) por `(ID_CARTA, DT_COTACAO)` (equality nula-segura `<=>`). Particionada por `ANO_COTACAO`/`MES_COTACAO`.
+Full extract da Silver a cada execução; primeira carga `overwrite`, depois merge idempotente (`DeltaTable.merge()` com `withSchemaEvolution()`; chave duplicada no lote aborta antes de gravar) por `(ID_CARTA, DT_COTACAO)` (equality nula-segura `<=>`). Particionada por `ANO_COTACAO`/`MES_COTACAO`.
 
 ## 7. Data Quality e Auditoria
-Abortam a run: PK com chave NULA ou duplicata já gravada na tabela (duplicata dentro do lote é descartada em silêncio pelo `dropDuplicates` antes da gravação), `ID_ORACLE` nulo, valor negativo de preço e nulo residual em coluna categórica (limite 0); no pré-join, preços sem carta acima de 12000. Só informativos: coleção não encontrada, cartas sem cotação e ids migrados. 1 linha de auditoria em `TB_AUDITORIA_GOLD` (run id, início/fim, duração, contagens, resultado de DQ, status) por execução que chega ao DQ pós-carga (sucesso ou `FALHA_DQ`); abort no DQ pré-join ou na validação de PK não grava auditoria.
+Abortam a run: PK com chave NULA ou duplicada (no lote, antes de gravar; ou já gravada na tabela), `ID_ORACLE` nulo, valor negativo de preço e nulo residual em coluna categórica (limite 0); no pré-join, preços sem carta acima de 12000. Só informativos: coleção não encontrada, cartas sem cotação e ids migrados. 1 linha de auditoria em `TB_AUDITORIA_GOLD` (run id, início/fim, duração, contagens, resultado de DQ, status) por execução, inclusive as abortadas (gravada num `finally`): `SUCESSO`, `FALHA_DQ` (DQ pré-join ou pós-carga), `FALHA_DQ_PK` (validação de PK) ou `FALHA` (erro inesperado).
 
 ## 8. Histórico de Alterações
 | Data | Responsável | Alteração |

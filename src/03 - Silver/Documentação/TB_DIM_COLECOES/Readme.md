@@ -44,7 +44,7 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS 
 | COD_ANTIGO | string | Código antigo do set, se já foi renomeado. Sempre NULL: campo legado da magicthegathering.io, sem equivalente na Scryfall (a Stage grava None). | Não |
 | FLG_SOMENTE_ONLINE | boolean | true se o set só existe em ambiente digital (Arena/MTGO). NULO se ausente na Bronze. | Não |
 | QTD_CARTAS | int | Quantidade de cartas no set. | Não |
-| COD_COLECAO_PAI | string | Código do set "pai", quando este é um sub-set. Em minúsculas, como vem da Scryfall (COD_COLECAO é upper) - junte com `upper(COD_COLECAO_PAI)` = COD_COLECAO. | Não |
+| COD_COLECAO_PAI | string | Código do set "pai", quando este é um sub-set. Em maiúsculas, como COD_COLECAO - junta direto. | Não |
 | NME_BLOCO | string | Bloco de expansão ao qual o set pertence, normalizado (Title_Case, espaço vira `_`). NULO se o set não pertence a bloco. | Não |
 | URL_ICONE | string | URL do ícone SVG do set. | Não |
 | DESC_BOOSTER_SLOT_0..19 | string | Slot 0-19 do pacote de booster deste set (tipo de carta possível nessa posição). Sempre NULL: campo legado da magicthegathering.io, sem equivalente na Scryfall (a Stage grava None). | Não |

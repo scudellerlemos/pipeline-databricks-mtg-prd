@@ -112,6 +112,17 @@ def test_double_faced_card_falls_back_to_front_face():
     assert record["colors"] == json.dumps(["U"])
     assert record["power"] == "1"
     assert record["imageUrl"] == "https://img/delver.jpg"
+    # type_line existe na raiz aqui - não é trocado pela frente
+    assert record["type"] == "Creature — Human Wizard // Creature — Human Insect"
+
+
+def test_reversible_card_sem_type_line_na_raiz_usa_a_frente():
+    # Sem o fallback, NME_TIPO_CARTA saía NULO e derrubava o DQ da Gold.
+    card = {"name": "X // X", "layout": "reversible_card", "id": "rev-1",
+            "card_faces": [{"type_line": "Legendary Creature — Elf"}, {"type_line": "Legendary Creature — Elf"}]}
+
+    to_card_record, _ = _load_functions(_fake_get_for([]))
+    assert to_card_record(card)["type"] == "Legendary Creature — Elf"
 
 
 def test_double_faced_card_empty_colors_not_treated_as_missing():
@@ -158,6 +169,7 @@ if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     test_fetch_cards_by_sets_filters_by_set_and_maps_fields()
     test_double_faced_card_falls_back_to_front_face()
+    test_reversible_card_sem_type_line_na_raiz_usa_a_frente()
     test_double_faced_card_empty_colors_not_treated_as_missing()
     test_legalities_dict_is_serialized_as_valid_json()
     test_missing_scryfall_only_fields_are_none()

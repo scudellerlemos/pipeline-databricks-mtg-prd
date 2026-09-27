@@ -42,7 +42,7 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS,
 | ID_CARTA_ASSOCIADA | string | Id de carta associado a este registro de migração, quando informado pela fonte. | Não |
 | COD_IDIOMA | string | Idioma associado a este registro de migração. | Não |
 | NME_CARTA_ASSOCIADA | string | Nome de carta associado a este registro de migração. | Não |
-| COD_COLECAO_ASSOCIADA | string | Código de coleção associado a este registro de migração. Em minúsculas, como vem da Scryfall - junte com `upper(COD_COLECAO_ASSOCIADA)` = COD_COLECAO. | Não |
+| COD_COLECAO_ASSOCIADA | string | Código de coleção associado a este registro de migração. Em maiúsculas, como COD_COLECAO - junta direto. | Não |
 | ID_ORACLE_ASSOCIADO | string | Oracle id associado a este registro de migração. | Não |
 | NUM_COLECIONADOR_ASSOCIADO | string | Número de colecionador associado a este registro de migração. | Não |
 | ID_CARTA_CANONICO | string | Id final resolvido após seguir toda a cadeia de unificações a partir de `ID_CARTA_ANTIGO` (ex.: A->B->C resolve direto para C). Igual a `ID_CARTA_ANTIGO` quando não há migração de unificação para essa carta. | Não |

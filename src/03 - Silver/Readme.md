@@ -61,10 +61,10 @@ São 7 notebooks, orquestrados por `.github/DAGs/silver.yml` (detalhe de cada ta
 | Notebook | Chave | `order_by_col` (dedup) | Partição |
 |---|---|---|---|
 | `TB_FATO_CARTAS.py` | `ID_CARTA` | `DT_INGESTAO` | `ANO_INGESTAO`/`MES_INGESTAO` |
-| `TB_DIM_COLECOES.py` | `COD_COLECAO` | — (dropDuplicates) | `ANO_LANCAMENTO`/`MES_LANCAMENTO` |
+| `TB_DIM_COLECOES.py` | `COD_COLECAO` | `DT_INGESTAO` | `ANO_LANCAMENTO`/`MES_LANCAMENTO` |
 | `TB_FATO_PRECOS_CARTAS.py` | `ID_CARTA` + `DT_INGESTAO` | — (dropDuplicates) | `ANO_INGESTAO`/`MES_INGESTAO` |
 | `TB_MOV_MIGRACOES_CARTAS.py` | `ID_MIGRACAO` | `DT_INGESTAO` | `ANO_EXECUCAO`/`MES_EXECUCAO` |
-| `TB_DOM_SIMBOLOS.py` | `COD_SIMBOLO` | — (dropDuplicates) | sem partição |
+| `TB_DOM_SIMBOLOS.py` | `COD_SIMBOLO` | `DT_INGESTAO` | sem partição |
 | `TB_FATO_ESCLARECIMENTOS_CARTAS.py` | `ID_ESCLARECIMENTO` | `DT_INGESTAO` | `ANO_PUBLICACAO`/`MES_PUBLICACAO` |
 | `TB_PONTE_CARTA_SIMBOLOS.py` | `ID_CARTA` + `NUM_ORDEM_SIMBOLO` | — (dropDuplicates) | sem partição |
 

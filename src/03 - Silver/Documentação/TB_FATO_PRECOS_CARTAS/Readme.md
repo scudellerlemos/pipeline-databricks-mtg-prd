@@ -45,7 +45,7 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS 
 | VLR_EUR_FOIL | float | Preço em euros da versão foil. NULO = sem cotação, não zero. | Não |
 | VLR_TIX | float | Preço em MTGO tickets. NULO = sem cotação em tix nesta coleta, não zero. | Não |
 | URL_SCRYFALL | string | URL da página da carta na Scryfall. | Não |
-| URL_IMAGEM | string | URL da imagem desta impressão cotada. Nulo em cartas de dupla face (a Stage de card_prices não tem o fallback pra `card_faces`). | Não |
+| URL_IMAGEM | string | URL da imagem desta impressão cotada (em dupla face, a imagem da frente - `card_faces[0]`). | Não |
 | DT_LANCAMENTO | date | Data de lançamento desta impressão (released_at da carta na Scryfall) - pode diferir da data da coleção (TB_DIM_COLECOES.DT_LANCAMENTO). | Não |
 | DT_INGESTAO | timestamp | Início da execução da Stage que gravou o registro (mesmo valor em todas as linhas da run). | Sim |
 | NME_FONTE | string | Fonte de dados de origem ('Scryfall'). 'NA' se ausente. | Não |

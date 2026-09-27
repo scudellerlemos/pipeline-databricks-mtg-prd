@@ -117,7 +117,7 @@ run = start_run("cards", endpoint, params)
 data = http_get_with_retry(url, headers, timeout, retries)
 
 # Salvamento em Parquet no Stage (snapshot datado, idempotente)
-save_to_parquet(spark, data, "cards", base_path, schema=CARDS_SCHEMA, run=run)  # -> {base_path}/cards/{year}_{month}_{day}_cards.parquet
+save_to_parquet(spark, data, "cards", base_path, schema=CARDS_SCHEMA, run=run)  # -> {base_path}/cards/{year}_{month}_{YYYYMMDD}_cards.parquet
 
 # Controle de execução: fim do run (SUCCESS/FAILED)
 finish_run(run, base_path, status="SUCCESS")

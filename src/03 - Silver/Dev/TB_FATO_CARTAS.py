@@ -88,9 +88,6 @@ def transform_cards_silver(df):
     Transformação específica para tabela Cartas, via uma única spark.sql()
     com CTEs (WITH ... AS (...)).
     """
-    if not df:
-        return None
-
     logger = logging.getLogger(__name__)
     logger.info("Iniciando transformações específicas para Cartas...")
 
@@ -183,13 +180,13 @@ def transform_cards_silver(df):
                 -- isolado; "—" (em dash) separa tipo principal de subtipo
                 -- descritivo. As duas colunas saem da mesma origem.
                 CASE
-                    WHEN NME_TIPO_CARTA IS NULL THEN NULL
+                    WHEN NME_TIPO_CARTA IS NULL OR trim(NME_TIPO_CARTA) = '' THEN 'NA'
                     WHEN lower(NME_TIPO_CARTA) LIKE '%planeswalker%' THEN 'Planeswalker'
                     WHEN instr(NME_TIPO_CARTA, '—') > 0 THEN trim(split(NME_TIPO_CARTA, '—', 2)[0])
                     ELSE trim(NME_TIPO_CARTA)
                 END AS NME_TIPO_CARTA,
                 CASE
-                    WHEN NME_TIPO_CARTA IS NULL THEN NULL
+                    WHEN NME_TIPO_CARTA IS NULL OR trim(NME_TIPO_CARTA) = '' THEN 'NA'
                     WHEN lower(NME_TIPO_CARTA) LIKE '%planeswalker%' THEN NME_TIPO_CARTA
                     WHEN instr(NME_TIPO_CARTA, '—') > 0 THEN trim(split(NME_TIPO_CARTA, '—', 2)[1])
                     ELSE 'NA'

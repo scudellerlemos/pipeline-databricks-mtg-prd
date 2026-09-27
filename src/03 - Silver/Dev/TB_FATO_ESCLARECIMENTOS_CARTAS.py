@@ -15,10 +15,13 @@ esclarecimento novo a cada carta lancada) e nao e uma lista de opcoes fixa.
 CHAVE UNICA - ID_ESCLARECIMENTO (SURROGATE): a Bronze rulings nao traz um id
 proprio de registro (Scryfall so garante oracle_id + source + published_at +
 comment) - ID_ESCLARECIMENTO e gerado por hash determinístico
-(sha2(concat_ws('|', ...), 256)) sobre essas 4 colunas, garantindo o mesmo id
-em reprocessamentos do mesmo dado e permitindo declarar PRIMARY KEY de
-verdade (coluna sempre NOT NULL, diferente de derivar a chave de colunas que
-podem faltar).
+(sha2(concat_ws('|', ...), 256)) sobre oracle_id + published_at + comment,
+garantindo o mesmo id em reprocessamentos do mesmo dado e permitindo declarar
+PRIMARY KEY de verdade (coluna sempre NOT NULL, diferente de derivar a chave
+de colunas que podem faltar). `source` (emissor) fica FORA do hash: partições
+antigas da Bronze tem source='scryfall' (a Stage sobrescrevia a coluna) e as
+novas tem o emissor real - com source no hash, o mesmo esclarecimento viraria
+duas linhas; sem ele, o merge por DT_INGESTAO mais recente corrige o emissor.
 
 REGRA "SEM ( ) { } NO DADO SILVER": DESC_ESCLARECIMENTO e texto de regras
 livre e pode conter parenteses/chaves de notacao de simbolo - mesma
@@ -71,9 +74,6 @@ def transform_rulings_silver(df):
     Transformacao especifica para tabela Esclarecimentos de Regras, via SQL
     (spark.sql sobre temp views).
     """
-    if not df:
-        return None
-
     logger = logging.getLogger(__name__)
     logger.info("Iniciando transformacoes especificas para Esclarecimentos de Regras...")
 
@@ -81,8 +81,8 @@ def transform_rulings_silver(df):
 
     # CTE _renomeado so traduz Bronze -> PT-BR; o SELECT externo computa o
     # hash e as transformacoes de negocio. ID_ESCLARECIMENTO e lido de
-    # _renomeado (antes da traducao de NME_EMISSOR e da limpeza de
-    # DESC_ESCLARECIMENTO) para manter o mesmo hash entre reprocessamentos.
+    # _renomeado (antes da limpeza de DESC_ESCLARECIMENTO) para manter o
+    # mesmo hash entre reprocessamentos.
     df_final = spark.sql(r"""
         WITH _renomeado AS (
             SELECT
@@ -91,7 +91,9 @@ def transform_rulings_silver(df):
                 published_at AS DT_PUBLICACAO,
                 comment AS DESC_ESCLARECIMENTO,
                 ingestion_timestamp AS DT_INGESTAO,
-                source AS NME_FONTE,
+                -- source aqui e o EMISSOR (wotc/scryfall), nao a linhagem;
+                -- a fonte dos dados e sempre a Scryfall.
+                'scryfall' AS NME_FONTE,
                 endpoint AS DESC_URL_ORIGEM,
                 source_file AS DESC_ARQUIVO_ORIGEM,
                 bronze_run_id AS ID_EXECUCAO_BRONZE,
@@ -103,7 +105,6 @@ def transform_rulings_silver(df):
             sha2(
                 concat_ws('|',
                     coalesce(ID_ORACLE, ''),
-                    coalesce(NME_EMISSOR, ''),
                     coalesce(cast(to_date(DT_PUBLICACAO) AS STRING), ''),
                     coalesce(DESC_ESCLARECIMENTO, '')
                 ),
