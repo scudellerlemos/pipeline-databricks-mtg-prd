@@ -52,8 +52,10 @@ jobs:
         with:
           python-version: '3.11'
 
+      # Vem do codigo na tag, nao daqui: este arquivo so muda quando o repo
+      # -prd e atualizado na mao, e foi assim que o requests ficou pra tras.
       - name: Instalar dependências
-        run: pip install pyyaml==6.0.2 pytest==8.3.3 ruff==0.6.9
+        run: pip install -r .github/requirements-ci.txt
 
       # CLI nova (binario Go) pinada na mesma versao do repo de codigo.
       - name: Instalar Databricks CLI
