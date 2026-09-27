@@ -63,9 +63,10 @@ finally:
 
 # COMMAND ----------
 
-# 3. Os schemas do medalhao existem? setup_unity_catalog cria se faltar, entao
-#    isso tambem e o bootstrap de um catalogo novo (mtg_prod nasceu vazio).
-for schema in ["stage", "bronze", "silver", "gold"]:
+# 3. Os schemas do medalhao no UC existem (a Stage vive so no S3, sem schema)?
+#    setup_unity_catalog cria se faltar, entao isso tambem e o bootstrap de um
+#    catalogo novo (mtg_prod nasceu vazio).
+for schema in ["bronze", "silver", "gold"]:
     setup_unity_catalog(catalog, schema)
 
 print(f"SMOKE OK · {ambiente} · {catalog}")

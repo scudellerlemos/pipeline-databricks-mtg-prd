@@ -20,7 +20,8 @@ Preco em Magic varia por impressao - o Lightning Bolt tem ~70 delas, de
 menos de 1 USD a centenas - entao o preco por NOME nao existe como numero
 unico. A Stage ingere o bulk default_cards (1 objeto por impressao, cada um
 com seu proprio `prices`), por isso ID_CARTA chega ate aqui e o join com
-TB_FATO_CARTAS e 1:1 por impressao, sem fan-out.
+TB_FATO_CARTAS e N:1 (cada cotacao casa com exatamente uma impressao;
+uma impressao tem N cotacoes, uma por DT_INGESTAO), sem fan-out.
 
 CHAVE UNICA: ID_CARTA + DT_INGESTAO (ver save_silver_table no fim do
 notebook). A Bronze card_prices e APPEND-only - sem MERGE/upsert e sem

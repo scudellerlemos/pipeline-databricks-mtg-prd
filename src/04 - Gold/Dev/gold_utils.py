@@ -85,9 +85,8 @@ def create_manual_config(catalog_name, s3_bucket, s3_gold_prefix=None):
         'schema_silver': "silver",
         'schema_gold': "gold",
         's3_bucket': s3_bucket,
-        # get_secret e nao a string crua: prd e dev dividem o bucket, entao
-        # sem o override de S3_GOLD_PREFIX os dois gravariam Delta no mesmo
-        # caminho. O argumento explicito continua vencendo.
+        # get_secret e nao a string crua: permite override por ambiente via
+        # MTG_S3_GOLD_PREFIX. O argumento explicito continua vencendo.
         's3_gold_prefix': s3_gold_prefix or get_secret("s3_gold_prefix", "gold")
     }
 
@@ -250,7 +249,7 @@ def save_to_gold(df_final, catalog, schema, table_name, s3_gold_path,
         # match e a linha seria reinserida a cada execução (duplicando o dado).
         merge_condition = " AND ".join(f"gold.{k} <=> novo.{k}" for k in key_cols)
 
-        # withSchemaEvolution() no merge builder: coluna nova some sozinha,
+        # withSchemaEvolution() no merge builder: coluna nova entra sozinha,
         # sem precisar de migração manual. Exige Delta Lake 3.1+ (DBR 15.2+).
         delta_table = DeltaTable.forPath(spark_session, delta_path)
         (
@@ -289,8 +288,8 @@ def save_to_gold(df_final, catalog, schema, table_name, s3_gold_path,
 
 # ============================================================================
 # DATA QUALITY E AUDITORIA
-# Não existe helper de auditoria compartilhado (Silver/Gold não têm - só a
-# Stage tem control table própria, _control/{table}/{run_id}.json, fora do
+# Não existe helper de auditoria compartilhado (Silver/Gold não têm - só Stage e
+# Bronze têm control table própria, _control/{table}/{run_id}.json, fora do
 # escopo deste módulo) - construído mínimo aqui, direto em Delta/SQL.
 # ============================================================================
 class DataQualityError(RuntimeError):
@@ -355,7 +354,7 @@ def run_data_quality_checks(spark_session, rotulo, checks):
 
 
 def start_audit_run():
-    """Abre um run de auditoria - id determinístico por execução + timestamp de início."""
+    """Abre um run de auditoria - id único (uuid4) por execução + timestamp de início."""
     return {"id_execucao": str(uuid.uuid4()), "dt_inicio": datetime.now()}
 
 
@@ -364,7 +363,8 @@ def record_gold_audit(spark_session, catalog, schema, table_name, audit_run,
                        dq_resultados, status):
     """
     Fecha o run de auditoria e grava 1 linha em `{catalog}.{schema}.TB_AUDITORIA_GOLD`
-    (criada automaticamente na 1a chamada). 1 linha por execução de notebook Gold,
+    (criada automaticamente na 1a chamada). 1 linha por execução de notebook Gold
+    que chega ao DQ pós-carga (abort antes disso não passa por aqui),
     nunca é atualizada depois de gravada (log de execução, não estado).
     """
     dt_fim = datetime.now()

@@ -9,7 +9,7 @@
 ## 1. Nome da Tabela e Camada
 - **Tabela:** TB_DIM_COLECOES
 - **Camada:** Silver
-- **Classificação DAMA-DMBOK (#116):** Dimensão - descreve a entidade de negócio "coleção/edição" (nome, tipo, data de lançamento, bloco...), referenciada por `Cod_colecao` a partir de `TB_FATO_CARTAS`. Não é uma lista de domínio estática pequena (REF): cresce a cada lançamento, por isso `TB_DIM_` e não `TB_REF_`.
+- **Classificação DAMA-DMBOK (#116):** Dimensão - descreve a entidade de negócio "coleção/edição" (nome, tipo, data de lançamento, bloco...), referenciada por `COD_COLECAO` a partir de `TB_FATO_CARTAS`. Não é uma lista de domínio estática pequena (REF): cresce a cada lançamento, por isso `TB_DIM_` e não `TB_REF_`.
 
 ## 2. Descrição Completa
 Tabela Silver contendo os dados limpos e transformados de conjuntos (sets/edições) do Magic: The Gathering, processados a partir da camada Bronze, com aplicação de regras de negócio, limpeza de dados e padronização para análises de lançamento e coleção.
@@ -27,44 +27,44 @@ Tabela Silver contendo os dados limpos e transformados de conjuntos (sets/ediç�
   5. Escrita na tabela Delta: `TB_DIM_COLECOES` (Unity Catalog)
 
 ## 5. Convenção de Nome de Coluna
-Todas as colunas a partir da Silver são em PT-BR, sem acento, com a primeira letra maiúscula e o restante minúsculo (ex.: `Cod_colecao`, `Nme_colecao`), mesma convenção de `TB_FATO_CARTAS`.
+Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS (ex.: `COD_COLECAO`, `NME_COLECAO`), mesma convenção de `TB_FATO_CARTAS`.
 
 ## 6. Schema Detalhado
 | Nome da Coluna | Tipo | Descrição | Chave |
 |---|---|---|---|
-| Cod_colecao | string | Código curto do set/edição (ex.: 'M19'). Sempre presente. | Sim |
-| Nme_colecao | string | Nome completo do set/edição. Title case. | Não |
-| Nme_tipo_colecao | string | Tipo de set (core, expansion, masters, promo...). Title case. | Não |
-| Nme_cor_borda | string | Cor de borda padrão das cartas do set (black/white/silver). | Não |
-| Id_cardmarket | string | Id do set na Cardmarket (MKM). | Não |
-| Nme_cardmarket | string | Nome do set na Cardmarket (MKM). | Não |
-| Dt_lancamento | date | Data de lançamento do set. | Não |
-| Cod_gatherer | string | Código do set usado no Gatherer (Wizards). | Não |
-| Cod_magiccardsinfo | string | Código do set usado no site magiccards.info. | Não |
-| Cod_antigo | string | Código antigo do set, se já foi renomeado. | Não |
-| Flg_somente_online | boolean | true se o set só existe em ambiente digital (Arena/MTGO). NULO se ausente na Bronze. | Não |
-| Qtd_cartas | int | Quantidade de cartas no set. | Não |
-| Cod_colecao_pai | string | Código do set "pai", quando este é um sub-set. | Não |
-| Nme_bloco | string | Bloco de expansão ao qual o set pertence. | Não |
-| Url_icone | string | URL do ícone SVG do set. | Não |
-| Desc_booster_slot_0..19 | string | Slot 0-19 do pacote de booster deste set (tipo de carta possível nessa posição). | Não |
-| Nme_fonte | string | Fonte de dados de origem ('scryfall'). 'NA' se ausente. | Não |
-| Ano_lancamento | int | Ano derivado de Dt_lancamento (partição física). | Não |
-| Mes_lancamento | int | Mês derivado de Dt_lancamento (partição física). | Não |
-| Dt_ingestao | timestamp | Timestamp em que a Stage coletou o registro de set. | Não |
-| Desc_url_origem | string | Endpoint/URL da API de origem. | Não |
-| Desc_arquivo_origem | string | Caminho do arquivo Parquet de origem na Stage. | Não |
-| Id_execucao_bronze | string | Id da execução da Bronze que gravou a linha. | Não |
-| Dt_ingestao_bronze | timestamp | Timestamp em que a Bronze processou o registro. | Não |
+| COD_COLECAO | string | Código curto do set/edição (ex.: 'M19'). Sempre presente. | Sim |
+| NME_COLECAO | string | Nome completo do set/edição. Title case. | Não |
+| NME_TIPO_COLECAO | string | Tipo de set em Title Case (Core, Expansion, Masters, Promo...). | Não |
+| NME_COR_BORDA | string | Cor de borda padrão das cartas do set em Title Case (Black/White/Silver). Sempre NULL: campo legado da magicthegathering.io, sem equivalente na Scryfall (a Stage grava None). | Não |
+| ID_CARDMARKET | int | Id do set na Cardmarket (MKM). Sempre NULL: campo legado da magicthegathering.io, sem equivalente na Scryfall (a Stage grava None). | Não |
+| NME_CARDMARKET | string | Nome do set na Cardmarket (MKM). Sempre NULL: campo legado da magicthegathering.io, sem equivalente na Scryfall (a Stage grava None). | Não |
+| DT_LANCAMENTO | date | Data de lançamento do set. | Não |
+| COD_GATHERER | string | Código do set usado no Gatherer (Wizards). Sempre NULL: campo legado da magicthegathering.io, sem equivalente na Scryfall (a Stage grava None). | Não |
+| COD_MAGICCARDSINFO | string | Código do set usado no site magiccards.info. Sempre NULL: campo legado da magicthegathering.io, sem equivalente na Scryfall (a Stage grava None). | Não |
+| COD_ANTIGO | string | Código antigo do set, se já foi renomeado. Sempre NULL: campo legado da magicthegathering.io, sem equivalente na Scryfall (a Stage grava None). | Não |
+| FLG_SOMENTE_ONLINE | boolean | true se o set só existe em ambiente digital (Arena/MTGO). NULO se ausente na Bronze. | Não |
+| QTD_CARTAS | int | Quantidade de cartas no set. | Não |
+| COD_COLECAO_PAI | string | Código do set "pai", quando este é um sub-set. Em minúsculas, como vem da Scryfall (COD_COLECAO é upper) - junte com `upper(COD_COLECAO_PAI)` = COD_COLECAO. | Não |
+| NME_BLOCO | string | Bloco de expansão ao qual o set pertence, normalizado (Title_Case, espaço vira `_`). NULO se o set não pertence a bloco. | Não |
+| URL_ICONE | string | URL do ícone SVG do set. | Não |
+| DESC_BOOSTER_SLOT_0..19 | string | Slot 0-19 do pacote de booster deste set (tipo de carta possível nessa posição). Sempre NULL: campo legado da magicthegathering.io, sem equivalente na Scryfall (a Stage grava None). | Não |
+| NME_FONTE | string | Fonte de dados de origem ('Scryfall'). 'NA' se ausente. | Não |
+| ANO_LANCAMENTO | int | Ano derivado de DT_LANCAMENTO (partição física). | Não |
+| MES_LANCAMENTO | int | Mês derivado de DT_LANCAMENTO (partição física). | Não |
+| DT_INGESTAO | timestamp | Início da execução da Stage que gravou o registro (mesmo valor em todas as linhas da run). | Não |
+| DESC_URL_ORIGEM | string | Nome lógico da tabela de origem na Stage (sempre `sets`), não a URL da API. | Não |
+| DESC_ARQUIVO_ORIGEM | string | Caminho do arquivo Parquet de origem na Stage. | Não |
+| ID_EXECUCAO_BRONZE | string | Id da execução da Bronze que gravou a linha. | Não |
+| DT_INGESTAO_BRONZE | timestamp | Timestamp em que a Bronze processou o registro. | Não |
 
 ## 7. Chave Única
-`Cod_colecao`. Coluna NOT NULL por natureza (todo set tem código) - `silver_utils.save_to_silver` valida isso antes de declarar a constraint (1 `SELECT` que soma as linhas nulas da(s) coluna(s) de chave) e só então aplica `ALTER COLUMN ... SET NOT NULL` + `PRIMARY KEY` de verdade no Unity Catalog; se algum dia houver linha com `Cod_colecao` nulo, a gravação falha com erro explícito (contagem exata) em vez de a tabela ficar sem PK silenciosamente. `COMMENT ON TABLE` é sempre gravado, independente da PK.
+`COD_COLECAO`. Coluna NOT NULL por natureza (todo set tem código) - `silver_utils.save_to_silver` valida isso antes de declarar a constraint (1 `SELECT` que soma as linhas nulas da(s) coluna(s) de chave) e só então aplica `ALTER COLUMN ... SET NOT NULL` + `PRIMARY KEY` de verdade no Unity Catalog; se algum dia houver linha com `COD_COLECAO` nulo: na primeira carga (antes de a PK existir) a run falha com erro explícito (contagem exata) logo após a gravação - as linhas já gravadas permanecem na tabela - em vez de a tabela ficar sem PK silenciosamente; nas execuções seguintes a coluna já é NOT NULL, então o próprio MERGE é rejeitado pelo Delta (violação de NOT NULL) e nada é gravado. `COMMENT ON TABLE` é sempre gravado, independente da PK.
 
 ## 8. Regras de Implementação
-- **Filtro temporal:** não aplicado (dado de dimensão, histórico completo).
-- **Merge incremental:** por `Cod_colecao`.
-- **Particionamento:** por `Ano_lancamento` e `Mes_lancamento`.
-- **Limpeza:** `Nme_colecao`/`Nme_tipo_colecao`/`Nme_fonte` em Title Case; `Nme_fonte` nulo/vazio -> 'NA'.
+- **Filtro temporal:** nenhum na Silver; a Stage (`sets.py`) já restringe a coleções com `releaseDate` >= 1º de janeiro de (ano atual − `years_back`, padrão 5) - não é o histórico completo.
+- **Merge incremental:** por `COD_COLECAO`.
+- **Particionamento:** por `ANO_LANCAMENTO` e `MES_LANCAMENTO`.
+- **Limpeza:** `NME_COLECAO`/`NME_TIPO_COLECAO`/`NME_BLOCO`/`NME_FONTE` (e `NME_CARDMARKET`/`NME_COR_BORDA`, sempre NULOS) normalizados via `normalizar_valores`; `NME_FONTE` nulo/vazio -> 'NA'.
 
 ## 9. Histórico de Alterações
 | Data | Responsável | Alteração |
@@ -74,5 +74,5 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, com a primeira le
 
 ## 10. Observações
 - Pipeline exibe logs detalhados de transformações aplicadas.
-- Merge incremental idempotente por `Cod_colecao`.
-- `Flg_somente_online` pode vir NULO em cargas Bronze antigas sem a coluna `onlineOnly`.
+- Merge incremental idempotente por `COD_COLECAO`.
+- `FLG_SOMENTE_ONLINE` pode vir NULO em cargas Bronze antigas sem a coluna `onlineOnly`.

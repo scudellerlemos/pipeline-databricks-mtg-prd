@@ -13,18 +13,17 @@ tempo.
 - **Tabela Unity Catalog:** `{catalog}.bronze.rulings`.
 - **Origem (Stage):** tabela `rulings`, gravada por [`src/01 - Ingestion/rulings.py`](<../../../01 - Ingestion/rulings.py>) a partir da API Scryfall (`/bulk-data` → `rulings`).
 - **Notebook Bronze:** [`../../Dev/rulings.py`](../../Dev/rulings.py).
-- **Relação com `cards`:** ligação é por `oracle_id` (1 oracle_id → N impressões em `cards`) - resolver essa relação é trabalho da Silver, não desta camada.
+- **Relação com `cards`:** ligação é por `oracle_id` (1 oracle_id → N impressões em `cards`) - o join acontece na Gold, não nesta camada.
 - **Histórico:** EL puro, sem deduplicação.
 
 ## Colunas
 
 Além das [colunas técnicas comuns](../README.md#colunas-técnicas-comuns) -
-**exceto `source`, sobrescrita abaixo com um significado diferente nesta
-tabela**:
+**`source` repetida abaixo por causa de um bug conhecido nesta tabela**:
 
 | Coluna | Descrição |
 |---|---|
 | `oracle_id` | Oracle id da carta a que esta ruling se aplica (mesmo valor para todas as impressões da carta). |
-| `source` | Quem emitiu a ruling: `wotc` (oficial da Wizards) ou `scryfall` (adicionada pela Scryfall). **Atenção:** aqui `source` vem no próprio registro de ruling da fonte - não é o metadado técnico "nome da fonte de dados" usado nas outras tabelas. |
+| `source` | Sempre `scryfall`. **Bug conhecido:** a ruling de origem traz quem a emitiu (`wotc` ou `scryfall`), mas o `save_to_parquet` da Stage sobrescreve a coluna com `scryfall` e o valor original se perde. |
 | `published_at` | Data de publicação da ruling. |
 | `comment` | Texto da ruling / esclarecimento de regras. |

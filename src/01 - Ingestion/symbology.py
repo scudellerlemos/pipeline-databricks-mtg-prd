@@ -25,7 +25,7 @@ from pyspark.sql.types import *
 # =============================================================================
 
 # GET /symbology devolve o catálogo inteiro de símbolos (mana, tap, etc.) em 1
-# request só (has_more=false), mesmo padrão de sets.ipynb. É um catálogo de
+# request só (has_more=false), mesmo padrão de sets.py. É um catálogo de
 # referência - a Scryfall não expõe data de alteração por símbolo, então não
 # há filtro temporal (years_back/cutoff): idempotência é só por arquivo do dia.
 SCRYFALL_API_URL = get_secret("scryfall_api_url")
@@ -83,8 +83,8 @@ def _to_symbol_record(s):
         "phyrexian": s.get("phyrexian"),
         "cmc": as_float(s.get("cmc")),
         "funny": s.get("funny"),
-        # colors/gatherer_alternates são listas (ou null) na Scryfall - mesmo
-        # tratamento de booster em sets.ipynb: serializa como JSON pra caber
+        # colors/gatherer_alternates são listas (ou null) na Scryfall -
+        # serializa como JSON pra caber
         # numa coluna StringType sem perder a estrutura original.
         "colors": json.dumps(s.get("colors")) if s.get("colors") is not None else None,
         "gatherer_alternates": json.dumps(s.get("gatherer_alternates")) if s.get("gatherer_alternates") is not None else None,
@@ -93,7 +93,7 @@ def _to_symbol_record(s):
 def fetch_all_symbols():
     # GET /symbology documenta has_more=false (catálogo inteiro em 1 request),
     # mas segue next_page defensivamente - mesmo padrão de fetch_all_migrations()
-    # em migrations.ipynb, caso a Scryfall passe a paginar esse endpoint.
+    # em migrations.py, caso a Scryfall passe a paginar esse endpoint.
     records = []
     url = f"{SCRYFALL_API_URL}/symbology"
     while url:

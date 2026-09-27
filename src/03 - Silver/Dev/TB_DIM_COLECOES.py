@@ -14,8 +14,8 @@ domínio estática pequena (REF), é uma dimensão real que cresce a cada
 lançamento. Daí TB_DIM_ e não TB_REF_.
 
 CHAVE ÚNICA: COD_COLECAO (código curto do set - sempre presente e nunca nulo
-na fonte, ver save_silver_table no fim do notebook). Diferente de
-TB_FATO_CARTAS, aqui a chave é uma única coluna NOT NULL - Unity Catalog
+na fonte, ver save_silver_table no fim do notebook). Como em
+TB_FATO_CARTAS, a chave é uma única coluna NOT NULL - Unity Catalog
 consegue declarar a constraint PRIMARY KEY de verdade (não só o comentário
 de tabela), ver silver_utils.save_to_silver.
 
@@ -84,9 +84,9 @@ def transform_sets_silver(df):
     online_only_select = "onlineOnly AS FLG_SOMENTE_ONLINE" if "onlineOnly" in df.columns \
         else "CAST(NULL AS BOOLEAN) AS FLG_SOMENTE_ONLINE"
 
-    # booster_0..19: a Stage explode a lista "booster" da fonte em 1 coluna
-    # por posição (ver bronze_column_docs.py) - repassa aqui com nome PT-BR,
-    # sem mudar o formato.
+    # booster_0..19: legado da magicthegathering.io, sempre nulo (a Scryfall
+    # não expõe booster - ver bronze_column_docs.py) - repassa aqui com nome
+    # PT-BR, sem mudar o formato.
     booster_cols_select = ", ".join(f"booster_{i} AS DESC_BOOSTER_SLOT_{i}" for i in range(20))
 
     # Uma única query: renomeia Bronze -> PT-BR, converte DT_LANCAMENTO e já

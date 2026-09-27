@@ -31,10 +31,11 @@ JSON_TMP = "job_deploy.json"
 # ---------------------------------------------------------------------------
 # ALVO DE DEPLOY
 # ---------------------------------------------------------------------------
-# dev e prd dividem o mesmo workspace e o MESMO codigo - o repo de prd nao tem
-# copia de nada, ele so faz checkout deste repo numa tag e chama este script.
-# Entao nada que diferencia os dois pode estar escrito no YAML: vem de env var
-# do workflow e e injetado no job antes do POST.
+# dev e prd dividem o mesmo workspace e o MESMO codigo - o repo de prd recebe
+# uma copia deste repo a cada publicacao (merge na main que toca codigo, via
+# promote.yml) e roda este script na tag publicada. Entao nada que diferencia
+# os dois pode estar escrito no YAML: vem de env var do workflow e e injetado
+# no job antes do POST.
 TARGET = {
     # sufixo no nome do job: "" em dev, "_PRD" em producao
     "suffix": os.environ.get("MTG_JOB_SUFFIX", ""),
@@ -72,8 +73,8 @@ def job_name(job_key):
 #
 # get_secret() no notebook resolve na ordem env var > secret > default, e as
 # chaves do scope nao sao segredo nenhum (bucket, prefixo, URL publica) - sao
-# config. Entao dev e prd dividem um scope so, com o que e igual, e o que
-# difere viaja por aqui: fica versionado no workflow em vez de invisivel.
+# config. Entao dev e prd dividem um scope so, com a config de dev, e o que
+# prd muda viaja por aqui: fica versionado no workflow em vez de invisivel.
 #
 # MTG_ENVIRONMENT vai junto de proposito - e o que arma, no get_secret, a
 # trava que impede producao de resolver o catalogo pra mtg_dev.

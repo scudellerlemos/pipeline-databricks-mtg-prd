@@ -9,10 +9,10 @@
 ## 1. Nome da Tabela e Camada
 - **Tabela:** TB_MOV_MIGRACOES_CARTAS
 - **Camada:** Silver
-- **Classificação DAMA-DMBOK:** MOV (movimentação) - registra um evento de mudança de identificador (`Id_carta_antigo` -> `Id_carta_novo`), não um atributo de carta nem uma dimensão. Prefixo `TB_MOV_` sinaliza isso.
+- **Classificação DAMA-DMBOK:** MOV (movimentação) - registra um evento de mudança de identificador (`ID_CARTA_ANTIGO` -> `ID_CARTA_NOVO`), não um atributo de carta nem uma dimensão. Prefixo `TB_MOV_` sinaliza isso.
 
 ## 2. Descrição Completa
-Histórico de migrações de id de carta feitas pela Scryfall (unificação de duplicatas, remoção de registros errados) e o id canônico já resolvido para cada carta afetada. A Scryfall ocasionalmente descobre que duas impressões cadastradas eram a mesma carta e as unifica sob um único id, ou remove um id criado por engano - quem consumia o `Id_carta` antigo precisa saber para qual id atual ele aponta, ou a analise fica presa em um id morto.
+Histórico de migrações de id de carta feitas pela Scryfall (unificação de duplicatas, remoção de registros errados) e o id canônico já resolvido para cada carta afetada. A Scryfall ocasionalmente descobre que duas impressões cadastradas eram a mesma carta e as unifica sob um único id, ou remove um id criado por engano - quem consumia o `ID_CARTA` antigo precisa saber para qual id atual ele aponta, ou a analise fica presa em um id morto.
 
 ## 3. Origem dos Dados
 - **Fonte (Bronze):** `migrations`
@@ -27,43 +27,43 @@ Histórico de migrações de id de carta feitas pela Scryfall (unificação de d
   5. Escrita na tabela Delta: `TB_MOV_MIGRACOES_CARTAS` (Unity Catalog)
 
 ## 5. Convenção de Nome de Coluna
-Todas as colunas a partir da Silver são em PT-BR, sem acento, com a primeira letra maiúscula e o restante minúsculo, mesma convenção de `TB_FATO_CARTAS`.
+Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS, mesma convenção de `TB_FATO_CARTAS`.
 
 ## 6. Schema Detalhado
 | Nome da Coluna | Tipo | Descrição | Chave |
 |---|---|---|---|
-| Id_migracao | string | Id único do registro de migração na Scryfall (id natural da fonte). | Sim |
-| Url_scryfall | string | URL do registro de migração na Scryfall. | Não |
-| Dt_execucao | timestamp | Timestamp em que a migração foi executada pela Scryfall. | Não |
-| Nme_estrategia_migracao | string | Estratégia da migração: 'Unificacao' (duas cartas viraram uma) ou 'Remocao' (id descontinuado sem substituto). | Não |
-| Id_carta_antigo | string | Id que deixou de ser válido. | Não |
-| Id_carta_novo | string | Id que substitui o antigo (NULO quando a estratégia é 'Remocao', sem substituto). | Não |
-| Desc_nota | string | Nota explicativa da Scryfall sobre a migração, notação `[..]`. 'NA' se ausente. | Não |
-| Id_carta_associada | string | Id de carta associado a este registro de migração, quando informado pela fonte. | Não |
-| Cod_idioma | string | Idioma associado a este registro de migração. | Não |
-| Nme_carta_associada | string | Nome de carta associado a este registro de migração. | Não |
-| Cod_colecao_associada | string | Código de coleção associado a este registro de migração. | Não |
-| Id_oracle_associado | string | Oracle id associado a este registro de migração. | Não |
-| Num_colecionador_associado | string | Número de colecionador associado a este registro de migração. | Não |
-| Id_carta_canonico | string | Id final resolvido após seguir toda a cadeia de unificações a partir de `Id_carta_antigo` (ex.: A->B->C resolve direto para C). Igual a `Id_carta_antigo` quando não há migração de unificação para essa carta. | Não |
-| Dt_ingestao | timestamp | Timestamp em que a Stage coletou o registro de migração. | Não |
-| Nme_fonte | string | Fonte de dados de origem ('scryfall'). 'NA' se ausente. | Não |
-| Desc_url_origem | string | Endpoint/URL da API de origem. | Não |
-| Desc_arquivo_origem | string | Caminho do arquivo Parquet de origem na Stage. | Não |
-| Id_execucao_bronze | string | Id da execução da Bronze que gravou a linha. | Não |
-| Dt_ingestao_bronze | timestamp | Timestamp em que a Bronze processou o registro. | Não |
-| Ano_execucao | int | Ano derivado de Dt_execucao (partição física). | Não |
-| Mes_execucao | int | Mês derivado de Dt_execucao (partição física). | Não |
+| ID_MIGRACAO | string | Id único do registro de migração na Scryfall (id natural da fonte). | Sim |
+| URL_SCRYFALL | string | URL do registro de migração na Scryfall. | Não |
+| DT_EXECUCAO | date | Data em que a migração foi executada pela Scryfall. | Não |
+| NME_ESTRATEGIA_MIGRACAO | string | Estratégia da migração: 'Unificacao' (duas cartas viraram uma) ou 'Remocao' (id descontinuado sem substituto). | Não |
+| ID_CARTA_ANTIGO | string | Id que deixou de ser válido. | Não |
+| ID_CARTA_NOVO | string | Id que substitui o antigo (NULO quando a estratégia é 'Remocao', sem substituto). | Não |
+| DESC_NOTA | string | Nota explicativa da Scryfall sobre a migração, notação `[..]`. 'NA' se ausente. | Não |
+| ID_CARTA_ASSOCIADA | string | Id de carta associado a este registro de migração, quando informado pela fonte. | Não |
+| COD_IDIOMA | string | Idioma associado a este registro de migração. | Não |
+| NME_CARTA_ASSOCIADA | string | Nome de carta associado a este registro de migração. | Não |
+| COD_COLECAO_ASSOCIADA | string | Código de coleção associado a este registro de migração. Em minúsculas, como vem da Scryfall - junte com `upper(COD_COLECAO_ASSOCIADA)` = COD_COLECAO. | Não |
+| ID_ORACLE_ASSOCIADO | string | Oracle id associado a este registro de migração. | Não |
+| NUM_COLECIONADOR_ASSOCIADO | string | Número de colecionador associado a este registro de migração. | Não |
+| ID_CARTA_CANONICO | string | Id final resolvido após seguir toda a cadeia de unificações a partir de `ID_CARTA_ANTIGO` (ex.: A->B->C resolve direto para C). Igual a `ID_CARTA_ANTIGO` quando não há migração de unificação para essa carta. | Não |
+| DT_INGESTAO | timestamp | Início da execução da Stage que gravou o registro (mesmo valor em todas as linhas da run). | Não |
+| NME_FONTE | string | Fonte de dados de origem ('Scryfall'). 'NA' se ausente. | Não |
+| DESC_URL_ORIGEM | string | Nome lógico da tabela de origem na Stage (sempre `migrations`), não a URL da API. | Não |
+| DESC_ARQUIVO_ORIGEM | string | Caminho do arquivo Parquet de origem na Stage. | Não |
+| ID_EXECUCAO_BRONZE | string | Id da execução da Bronze que gravou a linha. | Não |
+| DT_INGESTAO_BRONZE | timestamp | Timestamp em que a Bronze processou o registro. | Não |
+| ANO_EXECUCAO | int | Ano derivado de DT_EXECUCAO (partição física). | Não |
+| MES_EXECUCAO | int | Mês derivado de DT_EXECUCAO (partição física). | Não |
 
 ## 7. Chave Única
-`Id_migracao`. Id natural, sempre presente na fonte (toda migração tem um id próprio na Scryfall) - coluna NOT NULL, `PRIMARY KEY` real no Unity Catalog.
+`ID_MIGRACAO`. Id natural, sempre presente na fonte (toda migração tem um id próprio na Scryfall) - coluna NOT NULL, `PRIMARY KEY` real no Unity Catalog.
 
 ## 8. Regras de Implementação
 - **Filtro temporal:** não aplicado (histórico de migração é útil por completo).
-- **Merge incremental:** por `Id_migracao`, desempate por `Dt_ingestao` mais recente.
-- **Particionamento:** por `Ano_execucao` e `Mes_execucao`.
-- **Resolução de cadeia (`Id_carta_canonico`):** relocada de `TB_FATO_CARTAS.py` (#135/#136) para este notebook nesta revisão. Segue a cadeia de unificações em Python puro (`_resolve_id_chain`, máx. 10 saltos, seguro contra ciclo) a partir das migrações com `Nme_estrategia_migracao = 'Unificacao'` e `Id_carta_novo` preenchido - testado isoladamente em `test_migration_chain.py`.
-- **Regra "sem `( ) { }` no dado Silver":** `Desc_nota` converte `{...}`/`(...)` para `[...]`, mesma regra de `TB_FATO_CARTAS`.
+- **Merge incremental:** por `ID_MIGRACAO`, desempate por `DT_INGESTAO` mais recente.
+- **Particionamento:** por `ANO_EXECUCAO` e `MES_EXECUCAO`.
+- **Resolução de cadeia (`ID_CARTA_CANONICO`):** relocada de `TB_FATO_CARTAS.py` (#135/#136) para este notebook nesta revisão. Segue a cadeia de unificações em Python puro (`_resolve_id_chain`, máx. 10 saltos, seguro contra ciclo) a partir das migrações com `NME_ESTRATEGIA_MIGRACAO = 'Unificacao'` e `ID_CARTA_NOVO` preenchido - testado isoladamente em `test_migration_chain.py`.
+- **Regra "sem `( ) { }` no dado Silver":** `DESC_NOTA` converte `{...}`/`(...)` para `[...]`, mesma regra de `TB_FATO_CARTAS`.
 
 ## 9. Histórico de Alterações
 | Data | Responsável | Alteração |
@@ -73,5 +73,5 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, com a primeira le
 
 ## 10. Observações
 - Pipeline exibe logs detalhados de transformações aplicadas.
-- Consumidores Gold que agrupam/janelam uma carta através de uma migração de id devem usar `Id_carta_canonico`, não `Id_carta_antigo`/`Id_carta_novo` diretamente.
-- `Id_carta_novo` NULO é esperado para `Nme_estrategia_migracao = 'Remocao'` - não é dado faltante.
+- Consumidores Gold que agrupam/janelam uma carta através de uma migração de id devem usar `ID_CARTA_CANONICO`, não `ID_CARTA_ANTIGO`/`ID_CARTA_NOVO` diretamente.
+- `ID_CARTA_NOVO` NULO é esperado para `NME_ESTRATEGIA_MIGRACAO = 'Remocao'` - não é dado faltante.

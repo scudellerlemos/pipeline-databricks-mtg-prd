@@ -29,10 +29,10 @@ Unity Catalog (`{catalog}.bronze.cards`, etc.), o prefixo seria redundante.
 
 Todas as 6 tabelas têm um `README.md` próprio com a descrição de negócio da
 tabela (o que é, pra que serve) e a lista completa de colunas específicas
-dela. Os mesmos textos são a fonte usada para comentar a tabela/coluna no
+dela. Os mesmos textos (copiados à mão) comentam a tabela/coluna no
 Unity Catalog (`DESCRIBE TABLE EXTENDED {tabela}` mostra o mesmo conteúdo) -
-ver [`../Dev/bronze_column_docs.py`](../Dev/bronze_column_docs.py), fonte
-única compartilhada entre este README e o comentário aplicado no catálogo.
+ver [`../Dev/bronze_column_docs.py`](../Dev/bronze_column_docs.py), que é o
+que vai pro catálogo; ao mudar uma descrição, manter este README em sincronia.
 
 ## Colunas técnicas comuns
 
@@ -44,9 +44,9 @@ Stage (comuns a toda fonte, preservadas 1:1 como o resto do dado):
 
 | Coluna | Adicionada por | Descrição |
 |---|---|---|
-| `ingestion_timestamp` | Stage | Timestamp em que a Stage coletou o registro da fonte - distinto do `bronze_ingestion_timestamp`. |
-| `source` | Stage | Nome da fonte de dados de origem (ex.: `scryfall`). Em `rulings`, esta chave é sobrescrita com um significado de negócio diferente - ver [`rulings/README.md`](./rulings/README.md). |
-| `endpoint` | Stage | Endpoint/URL da API de origem que devolveu este registro. |
+| `ingestion_timestamp` | Stage | Início da execução da Stage que gravou o registro (mesmo valor em todas as linhas da run) - distinto do `bronze_ingestion_timestamp`. |
+| `source` | Stage | Nome da fonte de dados de origem (ex.: `scryfall`). Em `rulings` a fonte traz um `source` de negócio (`wotc`/`scryfall`), mas a Stage o sobrescreve com `scryfall` (bug conhecido) - ver [`rulings/README.md`](./rulings/README.md). |
+| `endpoint` | Stage | Nome da tabela/endpoint lógico gravado pela Stage (= nome da tabela, ex.: `cards`), não a URL da API. |
 | `source_file` | Bronze | Caminho completo do arquivo Parquet de origem na Stage (`_metadata.file_path`) - é a chave de idempotência: um arquivo só é lido de novo se seu `source_file` ainda não existir na tabela Bronze. |
 | `bronze_run_id` | Bronze | Id da execução da Bronze que gravou a linha (controle de execução). |
 | `bronze_ingestion_timestamp` | Bronze | Timestamp em que a Bronze processou o registro. |
@@ -57,15 +57,17 @@ Não há distinção de código entre a 1ª carga e as execuções seguintes: o
 `write.format("delta").mode("append")` cria a tabela Delta automaticamente
 se ela não existir. Toda execução segue o mesmo fluxo:
 
-1. Lista os arquivos Parquet da Stage para a tabela (`*_{stage_table_name}.parquet`).
+1. Lista os diretórios `.parquet` com part-file em `{s3_stage_path}/{stage_table_name}/` (ignora escrita não commitada).
 2. Descobre quais já foram carregados (via `source_file` distinto já presente na Bronze).
 3. Lê só os arquivos novos, adiciona as 3 colunas técnicas.
 4. Append no Delta com `mergeSchema=true` (evolução aditiva de schema).
-5. Garante a tabela no Unity Catalog (`CREATE TABLE IF NOT EXISTS ... LOCATION`, nunca `DROP`/`ALTER` automático).
+5. Garante a tabela no Unity Catalog (`CREATE TABLE ... LOCATION` só se ela não existir, nunca `DROP`) e aplica `COMMENT ON TABLE`/`ALTER COLUMN ... COMMENT` (só metadado) em toda execução.
 6. Grava o controle de execução em `{s3_bronze_path}/_control/{tabela}/{run_id}.json`.
 
-Se não há arquivo novo (ex.: 2ª execução no mesmo dia, já que a Stage não
-gera arquivo novo nesse caso), a run fecha como `SUCCESS` sem escrever nada -
+Se não há arquivo novo (ex.: 2ª execução no mesmo dia - a Stage pula a
+escrita porque o nome do arquivo já carrega o dia da execução; em
+`sets`/`card_prices` isso também acontece no mesmo dia do mês em outro mês, ver
+o bug conhecido no README da Ingestion), a run fecha como `SUCCESS` sem escrever nada -
 idempotência por identidade de arquivo, não por `SELECT DISTINCT` em dado de
 negócio.
 
@@ -74,7 +76,7 @@ negócio.
 A mesma carta/preço/regra pode aparecer em mais de um arquivo/execução da
 Stage ao longo do tempo (ex.: preço de uma carta em dois dias diferentes).
 A Bronze preserva as duas linhas - não há `dropDuplicates` nem `MERGE` por
-chave de negócio. Decidir o que é "estado atual" vs. "histórico" é трabalho
+chave de negócio. Decidir o que é "estado atual" vs. "histórico" é trabalho
 da Silver.
 
 ## Particionamento

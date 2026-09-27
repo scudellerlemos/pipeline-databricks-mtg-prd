@@ -3,10 +3,10 @@
 # BRONZE COLUMN DOCS - comentários de tabela/coluna pro Unity Catalog
 # ============================================================================
 """
-Fonte única dos comentários de tabela e coluna da Bronze: usada por
-bronze_utils.run_bronze_ingestion (COMMENT ON TABLE / ALTER COLUMN...COMMENT
-no Unity Catalog) e pelos READMEs de cada tabela em Documentação/ - evita
-descrever a mesma coluna em dois lugares que divergem com o tempo.
+Fonte dos comentários de tabela e coluna da Bronze aplicados no Unity Catalog
+por bronze_utils.run_bronze_ingestion (COMMENT ON TABLE / ALTER COLUMN...COMMENT).
+Os READMEs de Documentação/ repetem o mesmo texto à mão (não são gerados
+daqui, nada checa divergência) - ao mudar uma descrição, atualizar os dois.
 
 Cada notebook de tabela chama get_table_comment(nome)/get_column_comments(nome)
 e repassa pro run_bronze_ingestion. Não faz %run aninhado aqui (o lint estático
@@ -19,9 +19,9 @@ notebook, sem dependência de dbutils/spark (é só dado estático).
 # pode sobrescrever uma entrada (ex.: "source" significa outra coisa em
 # rulings) declarando a mesma chave em BRONZE_TABLES[tabela]["columns"].
 COMMON_COLUMNS = {
-    "ingestion_timestamp": "Timestamp em que a Stage coletou o registro da fonte - distinto do bronze_ingestion_timestamp.",
+    "ingestion_timestamp": "Início da execução da Stage que gravou o registro (mesmo valor em todas as linhas da run) - distinto do bronze_ingestion_timestamp.",
     "source": "Nome da fonte de dados de origem (ex.: 'scryfall').",
-    "endpoint": "Endpoint/URL da API de origem que devolveu este registro.",
+    "endpoint": "Nome da tabela/endpoint lógico gravado pela Stage (= nome da tabela, ex.: 'cards'), não a URL da API.",
     "source_file": "Caminho completo do arquivo Parquet de origem na Stage (_metadata.file_path) - chave de idempotência da Bronze.",
     "bronze_run_id": "Id da execução da Bronze que gravou a linha.",
     "bronze_ingestion_timestamp": "Timestamp em que a Bronze processou o registro.",
@@ -31,60 +31,60 @@ BRONZE_TABLES = {
     "cards": {
         "comment": "Catálogo de cartas de Magic: The Gathering - uma linha por impressão/edição de carta. Responde 'o que é essa carta': texto de regras, custo de mana, tipo, raridade, artista, em qual set saiu e em quais formatos de jogo (Standard, Commander, etc.) ela é legal. Base pra qualquer análise de deck, coleção ou busca de carta.",
         "columns": {
-            "id": "Id único da carta na Scryfall.",
+            "id": "Id da impressão na Scryfall (cada reimpressão da mesma carta tem o seu).",
             "name": "Nome da carta.",
             "manaCost": "Custo de mana em notação simbólica (ex.: '{2}{U}{U}').",
             "cmc": "Custo de mana convertido (soma numérica do custo de mana).",
             "colors": "Cores da carta.",
             "colorIdentity": "Identidade de cor da carta (usada em formatos como Commander).",
             "type": "Linha de tipo completa da carta (ex.: 'Creature — Human Wizard').",
-            "types": "Tipos principais da carta (ex.: Creature, Instant).",
-            "subtypes": "Subtipos da carta (ex.: Human, Wizard).",
+            "types": "Tipos principais da carta (ex.: Creature, Instant). Sempre nulo (campo legado da magicthegathering.io sem equivalente na Scryfall).",
+            "subtypes": "Subtipos da carta (ex.: Human, Wizard). Sempre nulo (campo legado da magicthegathering.io sem equivalente na Scryfall).",
             "rarity": "Raridade da impressão (common/uncommon/rare/mythic).",
             "set": "Código do set/edição desta impressão.",
             "setName": "Nome completo do set/edição.",
-            "text": "Texto de regras (oracle text) impresso na carta.",
+            "text": "Texto de regras oficial atual (Oracle text, com erratas) - não necessariamente o impresso nesta edição. Em dupla face, só a frente.",
             "artist": "Nome do ilustrador.",
             "number": "Número de colecionador dentro do set.",
             "power": "Força da criatura (texto, pode ser '*').",
             "toughness": "Resistência da criatura (texto, pode ser '*').",
             "layout": "Layout físico da carta (normal, split, transform, etc.).",
-            "multiverseid": "Id da carta no Gatherer (banco oficial de cartas da Wizards) - usado pra linkar a carta na fonte oficial.",
+            "multiverseid": "Id da carta no Gatherer (banco oficial de cartas da Wizards) - usado pra linkar a carta na fonte oficial. Sempre nulo (campo legado da magicthegathering.io; a Scryfall tem multiverse_ids, lista, mas a Stage não mapeia).",
             "imageUrl": "URL da imagem da carta.",
-            "variations": "Ids de outras impressões/variações visuais da mesma carta.",
-            "foreignNames": "Nomes/textos traduzidos em outros idiomas.",
-            "printings": "Códigos de todos os sets em que a carta já foi impressa.",
-            "originalText": "Texto de regras como impresso originalmente (antes de errata).",
-            "originalType": "Linha de tipo original antes de reclassificações.",
+            "variations": "Ids de outras impressões/variações visuais da mesma carta. Sempre nulo (campo legado da magicthegathering.io sem equivalente na Scryfall).",
+            "foreignNames": "Nomes/textos traduzidos em outros idiomas. Sempre nulo (campo legado da magicthegathering.io sem equivalente na Scryfall).",
+            "printings": "Códigos de todos os sets em que a carta já foi impressa. Sempre nulo (campo legado da magicthegathering.io sem equivalente na Scryfall).",
+            "originalText": "Texto de regras como impresso originalmente (antes de errata). Sempre nulo (campo legado da magicthegathering.io sem equivalente na Scryfall).",
+            "originalType": "Linha de tipo original antes de reclassificações. Sempre nulo (campo legado da magicthegathering.io sem equivalente na Scryfall).",
             "legalities": "Legalidade da carta por formato de jogo.",
             # Pode vir NULL em partições gravadas antes deste campo existir.
-            "oracle_id": "Oracle id da carta na Scryfall - estável entre impressões (printings) da mesma carta, ao contrário de id (que identifica só esta impressão). Usado na Silver para cruzar com migrations.metadata_oracle_id.",
+            "oracle_id": "Oracle id da carta na Scryfall - estável entre impressões (printings) da mesma carta, ao contrário de id (que identifica só esta impressão). Usado na Gold para ligar a carta aos esclarecimentos (rulings).",
         },
     },
     "sets": {
-        "comment": "Catálogo dos sets/edições de Magic: The Gathering já lançados (incluindo edições só digitais). Responde 'quando saiu, quantas cartas tem, a que bloco pertence e o que vem num pacote de booster' - útil pra organizar coleção por edição ou situar uma carta na linha do tempo do jogo.",
+        "comment": "Sets/edições de Magic: The Gathering. Cada run da Stage traz os lançados a partir de 1º de janeiro de (ano atual - years_back, padrão 5) e a Bronze acumula as runs (append), incluindo edições só digitais e anunciadas ainda não lançadas. Responde 'quando saiu, quantas cartas tem e a que bloco pertence' - útil pra organizar coleção por edição ou situar uma carta na linha do tempo do jogo.",
         "columns": {
-            "code": "Código curto do set/edição (ex.: 'M19').",
+            "code": "Código curto do set/edição (ex.: 'dmu', minúsculo como na Scryfall).",
             "name": "Nome completo do set/edição.",
             "type": "Tipo de set (core, expansion, masters, promo, etc.).",
-            "border": "Cor de borda padrão das cartas do set (black/white/silver).",
-            "mkm_id": "Id do set na Cardmarket (MKM) - usado pra cruzar com dado de preço/mercado da Cardmarket.",
-            "mkm_name": "Nome do set na Cardmarket (MKM) - pode diferir do nome oficial usado na Scryfall.",
+            "border": "Cor de borda padrão das cartas do set (black/white/silver). Sempre nulo (campo legado da magicthegathering.io sem equivalente na Scryfall).",
+            "mkm_id": "Id do set na Cardmarket (MKM) - usado pra cruzar com dado de preço/mercado da Cardmarket. Sempre nulo (campo legado da magicthegathering.io sem equivalente na Scryfall).",
+            "mkm_name": "Nome do set na Cardmarket (MKM) - pode diferir do nome oficial usado na Scryfall. Sempre nulo (campo legado da magicthegathering.io sem equivalente na Scryfall).",
             "releaseDate": "Data de lançamento do set.",
-            "gathererCode": "Código do set usado no Gatherer (Wizards).",
-            "magicCardsInfoCode": "Código do set usado no site magiccards.info.",
-            "oldCode": "Código antigo do set, se já foi renomeado.",
+            "gathererCode": "Código do set usado no Gatherer (Wizards). Sempre nulo (campo legado da magicthegathering.io sem equivalente na Scryfall).",
+            "magicCardsInfoCode": "Código do set usado no site magiccards.info. Sempre nulo (campo legado da magicthegathering.io sem equivalente na Scryfall).",
+            "oldCode": "Código antigo do set, se já foi renomeado. Sempre nulo (campo legado da magicthegathering.io sem equivalente na Scryfall).",
             "onlineOnly": "true se o set só existe em ambiente digital (Arena/MTGO).",
             "card_count": "Quantidade de cartas no set.",
             "parent_set_code": "Código do set 'pai', quando este é um sub-set (ex.: promos de um set principal).",
             "block": "Bloco de expansão ao qual o set pertence.",
             "icon_svg_uri": "URL do ícone SVG do set.",
-            "booster": "Campo legado da magicthegathering.io (lista de booster serializada) sem equivalente na Scryfall - sempre nulo desde a migração pra Scryfall, mantido só por imutabilidade de schema. Use booster_0..booster_19 pro dado de booster atual.",
-            # magicthegathering.io devolve "booster" como lista (1 tipo de
-            # carta possível por slot do pacote) - a Stage explode em 1
-            # coluna por posição em vez de manter array serializado.
+            "booster": "Campo legado da magicthegathering.io (lista de booster serializada) sem equivalente na Scryfall - sempre nulo desde a migração pra Scryfall, mantido só por imutabilidade de schema.",
+            # booster_N existia pra explodir a lista "booster" da
+            # magicthegathering.io; a Scryfall não expõe booster, então a
+            # Stage grava sempre nulo (colunas mantidas por imutabilidade).
             **{
-                f"booster_{i}": f"Slot {i} do pacote de booster deste set (tipo de carta possível nessa posição) - posição {i} da lista 'booster' da fonte, explodida em colunas."
+                f"booster_{i}": f"Slot {i} do pacote de booster (legado da magicthegathering.io). Sempre nulo: a Scryfall não expõe booster; coluna mantida só por imutabilidade de schema."
                 for i in range(20)
             },
         },
@@ -103,7 +103,7 @@ BRONZE_TABLES = {
             "eur_foil": "Preço em euros da variante foil da mesma impressão. Nulo quando a impressão não tem foil.",
             "tix": "Preço em MTGO tickets, como veio da fonte.",
             "scryfall_uri": "URL da página da carta na Scryfall.",
-            "image_url": "URL da imagem da carta.",
+            "image_url": "URL da imagem da carta. Nulo em cartas de dupla face (a Stage lê só `image_uris` da raiz, sem o fallback pra `card_faces[0]` de `cards.imageUrl`).",
             "releaseDate": "Data de lançamento da impressão/set desta carta.",
         },
     },
@@ -130,10 +130,10 @@ BRONZE_TABLES = {
         "comment": "Esclarecimentos oficiais de regras (rulings) publicados pela Wizards/Scryfall pra cartas específicas, ligados por oracle_id. Serve pra responder dúvida de interação entre cartas ou interpretação de regra que o texto da carta sozinho não deixa claro - uma carta pode acumular várias rulings ao longo do tempo.",
         "columns": {
             "oracle_id": "Oracle id da carta a que esta ruling se aplica (mesmo valor para todas as impressões da carta).",
-            # Sobrescreve o COMMON_COLUMNS["source"] genérico: aqui "source"
-            # vem no próprio registro de ruling da Scryfall, não é metadado
-            # técnico do pipeline.
-            "source": "Quem emitiu a ruling: 'wotc' (oficial da Wizards) ou 'scryfall' (adicionada pela Scryfall).",
+            # Sobrescreve o COMMON_COLUMNS["source"] genérico: a ruling da
+            # Scryfall traz seu próprio "source" (wotc/scryfall), mas o
+            # save_to_parquet da Stage sobrescreve com lit("scryfall").
+            "source": "Sempre 'scryfall'. BUG CONHECIDO: a ruling de origem traz quem a emitiu ('wotc' ou 'scryfall'), mas o save_to_parquet da Stage sobrescreve a coluna com 'scryfall' e o valor original se perde.",
             "published_at": "Data de publicação da ruling.",
             "comment": "Texto da ruling / esclarecimento de regras.",
         },

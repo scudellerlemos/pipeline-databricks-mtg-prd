@@ -18,11 +18,11 @@ com controle de execução auditável.
 ## 🔗 Fonte de dados: Scryfall API
 
 A [magicthegathering.io](https://docs.magicthegathering.io) foi descontinuada como
-fonte (issues #121/#123/#127/#128/#129) — os três notebooks usam exclusivamente a
+fonte (issues #121/#123/#127/#128/#129) — os seis notebooks usam exclusivamente a
 [Scryfall API](https://scryfall.com/docs/api):
 
 - **`cards.py`** e **`card_prices.py`**: [Bulk Data](https://scryfall.com/docs/api/bulk-data)
-  (`default_cards` / `oracle_cards`) — 1 request pro índice + 1 download do `.jsonl.gz`
+  (`default_cards`, ambos) — 1 request pro índice + 1 download do `.jsonl.gz`
   inteiro, filtrado em memória. Sem paginação, sem 1 request por carta/coleção.
 - **`sets.py`**: `GET /sets` — devolve o catálogo inteiro em 1 request (`has_more: false`),
   sem paginação. Além dos campos herdados da magicthegathering.io, captura também
@@ -30,25 +30,23 @@ fonte (issues #121/#123/#127/#128/#129) — os três notebooks usam exclusivamen
   sem equivalente na fonte antiga, antes simplesmente não coletados.
 - **`symbology.py`**: `GET /symbology` — catálogo inteiro de símbolos de carta/mana
   em 1 request (`has_more: false`), sem paginação. Tabela de referência estática (84
-  símbolos): sem filtro temporal, idempotência só por arquivo do dia. Hoje a Silver
-  decodifica símbolo de mana com `regexp_replace` hardcoded (`{W}`→branco, `{U}`→azul
-  etc., em `TB_FATO_CARTAS`), cobrindo só os símbolos de cor básicos — perde
-  híbrido/Phyrexian. `symbology.py` traz a fonte oficial pra esse mapeamento.
+  símbolos): sem filtro temporal, idempotência só por arquivo do dia. Consumida
+  na Silver por `TB_DOM_SIMBOLOS` (e, indiretamente, por
+  `TB_PONTE_CARTA_SIMBOLOS`, que usa `TB_DOM_SIMBOLOS` como domínio).
 - **`rulings.py`**: [Bulk Data](https://scryfall.com/docs/api/bulk-data) (`rulings`)
   — mesmo padrão de `cards.py`/`card_prices.py` (1 request pro índice + 1
   download do `.jsonl.gz` inteiro). Sem filtro temporal: diferente de preço/impressão,
   uma ruling antiga sobre uma carta antiga continua válida hoje — não expira pelo
   calendário. Catálogo pequeno (~79k linhas, ~5MB comprimido), sem necessidade de
-  recorte. Referencia a carta por `oracle_id` (não por impressão) — a Stage não hoje
-  captura `oracle_id` em `cards.py`, então esse join fica pendente pra Bronze/Silver
-  até que `oracle_id` seja adicionado a `cards.py` também.
+  recorte. Referencia a carta por `oracle_id` (não por impressão), também
+  capturado em `cards.py`; o join fica pra Gold.
 - **`migrations.py`**: `GET /migrations` — único endpoint da Stage que pagina de
   verdade (`has_more`/`next_page`, ~350 registros por página), diferente do padrão
   "1 request só" usado no resto da camada. Histórico de reconciliação de
   `scryfall_id` (`migration_strategy`: `delete` remove um ID, `merge` aponta
   `old_scryfall_id` → `new_scryfall_id`), referenciado por `metadata.oracle_id`/
   `metadata.set_code`/`metadata.collector_number` (flattenados em colunas
-  `metadata_*`, mesmo padrão do `booster` explodido em `sets.py`). Sem filtro
+  `metadata_*`). Sem filtro
   temporal: cortar por data quebraria a rastreabilidade de IDs antigos que
   Bronze/Silver podem precisar resolver, mesmo tratando de cartas antigas.
 
@@ -63,7 +61,7 @@ e decide o que gravar via idempotência de arquivo (abaixo), não via delta da A
 |---|---|---|---|
 | `cards.py` | `bulk-data/default_cards` | 1 linha por impressão (set+número) | Filtra por `set_codes` dentro da janela `years_back` (via `sets`) |
 | `sets.py` | `GET /sets` | 1 linha por coleção | Filtra por `releaseDate >= cutoff` |
-| `card_prices.py` | `bulk-data/oracle_cards` | 1 linha por carta (nome, deduplicado por Oracle ID) | Filtra por `releaseDate >= cutoff`, independente de `cards.py` |
+| `card_prices.py` | `bulk-data/default_cards` | 1 linha por impressão (`id`) | Filtra por `releaseDate >= cutoff`, independente de `cards.py` |
 | `symbology.py` | `GET /symbology` | 1 linha por símbolo | Catálogo estático, sem filtro temporal |
 | `rulings.py` | `bulk-data/rulings` | 1 linha por ruling (referenciada por `oracle_id`) | Sem filtro temporal, catálogo inteiro (~79k linhas) |
 | `migrations.py` | `GET /migrations` | 1 linha por migração de ID | Único endpoint paginado da Stage, sem filtro temporal |
@@ -78,9 +76,9 @@ manual no yml nem manter o custo de 2 workers o tempo todo.
 
 `card_prices.py` já leu os arquivos de `cards.parquet` pra descobrir quais cartas
 precisava precificar (criando uma dependência de execução entre os dois); hoje ele
-grava seu próprio snapshot do catálogo `oracle_cards` filtrado pela mesma janela
-`years_back`, e o join "esse preço pertence a essas impressões" (1 preço → N
-impressões, já que `oracle_cards` é deduplicado) fica pra Bronze/Silver.
+grava seu próprio snapshot de `default_cards` (1 linha por impressão, com `id`)
+filtrado pela mesma janela `years_back`, e o join com `cards` é 1:1 por `id` e
+fica pra Gold.
 
 `ingestion_utils.py` concentra o que é comum aos notebooks (`%run ./ingestion_utils`):
 `get_secret`, `setup_s3_storage`, `http_get_with_retry`, `save_to_parquet`,
@@ -92,8 +90,10 @@ devolvido).
 
 ## 📄 Documentação de negócio (o que é cada tabela/coluna)
 
-A Stage grava o dado exatamente como recebido da Scryfall, sem renomear nem
-transformar coluna nenhuma (ver [Imutabilidade](#-imutabilidade) abaixo) - é o
+A Stage grava o dado como recebido da Scryfall, só mapeado 1:1 para os nomes
+de coluna esperados por Bronze/Silver (ex.: `type_line`→`type`,
+`released_at`→`releaseDate`), com campos compostos serializados em JSON e sem
+regra de negócio (ver [Imutabilidade](#-imutabilidade) abaixo) - é o
 mesmo schema que a Bronze lê e persiste no Unity Catalog. Por isso o
 significado de negócio de cada tabela e cada coluna (o que é, pra que serve,
 que informação você tira dela) é documentado uma única vez, na Bronze, em vez
@@ -131,16 +131,16 @@ max_retries           # Tentativas de retry por request HTTP (padrão: 3)
 s3://{bucket}/{stage_prefix}/
 ├── cards/
 │   └── {year}_{month}_{day}_cards.parquet   # dia da execução no nome - evita pular o mês
-├── sets/                                    # inteiro a partir do 2º run do mesmo mês (AUD-04)
-│   └── {year}_{month}_{day}_sets.parquet
+├── sets/
+│   └── {year}_{month}_{day}_sets.parquet          # ano/mês do releaseDate, dia da execução: 1 arquivo por mês de lançamento
 ├── card_prices/
-│   └── {year}_{month}_{day}_card_prices.parquet   # mesma granularidade diária dos outros dois
+│   └── {year}_{month}_{day}_card_prices.parquet   # idem sets (releaseDate da impressão)
 ├── symbology/
 │   └── {year}_{month}_{day}_symbology.parquet     # partição por data de ingestão (sem coluna de data própria)
 ├── rulings/
-│   └── {year}_{month}_{day}_rulings.parquet       # partição por data de ingestão (sem coluna de data própria)
+│   └── {year}_{month}_{day}_rulings.parquet       # partição por data de ingestão (published_at não é usado)
 ├── migrations/
-│   └── {year}_{month}_{day}_migrations.parquet    # partição por data de ingestão (sem filtro/coluna de data própria)
+│   └── {year}_{month}_{day}_migrations.parquet    # partição por data de ingestão (performed_at não é usado)
 └── _control/
     ├── cards/{run_id}.json
     ├── sets/{run_id}.json
@@ -154,21 +154,27 @@ Cada tabela tem sua própria pasta - antes os 6 arquivos viviam juntos num diret
 
 ## 🔁 Idempotência e controle de execução
 
-- **Nome de arquivo determinístico** por tabela/dia — se o arquivo já existe, a run
-  pula essa partição (`files_skipped`) em vez de sobrescrever. Os três notebooks
-  (`cards`, `sets`, `card_prices`) usam o mesmo esquema via `save_to_parquet()`.
-- **`start_run()`/`finish_run()`** (`ingestion_utils.py`) gravam um JSON por execução em
+- **Nome de arquivo determinístico** — se o arquivo já existe, a run
+  pula essa partição (`files_skipped`) em vez de sobrescrever. Os seis notebooks
+  usam o mesmo esquema via `save_to_parquet()`. `{day}` é só o dia do mês da
+  execução; `{year}_{month}` é a data da execução, exceto em `sets` e
+  `card_prices`, onde vem do `releaseDate`.
+- **Bug conhecido (`sets`/`card_prices`):** como o nome não carrega o mês da
+  execução, uma run em outro mês mas no mesmo dia do mês acha o arquivo antigo
+  e pula a partição (ex.: `2021_03_05_card_prices.parquet` gravado em 05/09
+  faz a run de 05/10 não coletar os preços dos lançamentos de mar/2021).
+- **`start_run()`/`finish_run()`** (`ingestion_utils.py`): o `start_run` monta o registro em memória e o `finish_run` grava um JSON por execução em
   `_control/{table}/{run_id}.json` com: `run_id`, `endpoint`, `params`, início/fim,
   duração, `files_written`/`files_skipped`/`records_written`, `status`
-  (`RUNNING`/`SUCCESS`/`FAILED`) e `error`. É observabilidade — se o próprio
+  (`SUCCESS`/`FAILED`) e `error`. É observabilidade — se o próprio
   write do controle falhar, o notebook só avisa e segue (não mascara o resultado real).
 - Uma run nova **nunca apaga** dado de uma run anterior bem-sucedida — falha vira
-  `FAILED`/`PARTIAL` registrado no controle, sem tocar nos arquivos já gravados.
+  `FAILED` registrado no controle, sem tocar nos arquivos já gravados.
   Reprocessar é rodar o notebook de novo (idempotente por arquivo).
 
 ## 🛡️ Erros e retry
 
-`http_get_with_retry()` cobre todo request HTTP dos três notebooks: retry com backoff
+`http_get_with_retry()` cobre todo request HTTP dos seis notebooks: retry com backoff
 em 429 e 5xx, timeout/erro de conexão também tenta de novo; 4xx (exceto 429) falha
 direto, sem retry (erro do cliente não muda tentando de novo).
 

@@ -5,7 +5,7 @@
 # por chave de negocio e sem MERGE/upsert - so APPEND, preservando o dado da
 # Stage 1:1 e adicionando apenas metadados tecnicos de rastreabilidade
 # (source_file, bronze_run_id, bronze_ingestion_timestamp).
-# O mesmo card_id com price diferente em runs diferentes e historico de
+# O mesmo id (impressao) com precos (usd/eur/tix...) diferentes em runs diferentes e historico de
 # preco legitimo - nunca colapsado (nem por dropDuplicates, nem por MERGE).
 
 # =============================================================================

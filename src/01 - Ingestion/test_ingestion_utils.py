@@ -112,7 +112,7 @@ def test_http_get_with_retry_raises_after_exhausting_retries():
 def test_get_scryfall_set_codes_since_filters_by_date_and_lowercases():
     sets_data = {"data": [
         {"code": "LEA", "released_at": "1993-08-05"},
-        {"code": "trc", "released_at": "2026-11-13"},
+        {"code": "TRC", "released_at": "2026-11-13"},
         {"code": "old", "released_at": "1990-01-01"},
     ]}
     with _patch(lambda *a, **k: _Resp(200, sets_data)):

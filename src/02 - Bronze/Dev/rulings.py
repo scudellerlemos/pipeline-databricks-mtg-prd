@@ -6,7 +6,7 @@
 # Stage 1:1 e adicionando apenas metadados tecnicos de rastreabilidade
 # (source_file, bronze_run_id, bronze_ingestion_timestamp).
 # Decisoes oficiais de regras por oracle_id - relacionar com as impressoes
-# de cards (1 oracle_id -> N impressoes) e trabalho da Silver.
+# de cards (1 oracle_id -> N impressoes) e feito na Gold.
 
 # =============================================================================
 # FUNCOES COMPARTILHADAS (ver bronze_utils.py / bronze_column_docs.py)

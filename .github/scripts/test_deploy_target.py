@@ -1,6 +1,6 @@
 # ponytail: apply_target e o unico ponto onde dev e prd se diferenciam. Os
-# YAMLs sao identicos pros dois alvos de proposito (o repo de prd nao tem copia
-# de codigo, so faz checkout deste repo numa tag), entao se esta funcao errar o
+# YAMLs sao identicos pros dois alvos de proposito (o repo de prd recebe uma
+# copia deste codigo e roda o mesmo deploy.py na tag), entao se esta funcao errar o
 # job de producao sobe apontando pro catalogo de desenvolvimento e grava
 # em cima de mtg_dev sem ninguem perceber.
 

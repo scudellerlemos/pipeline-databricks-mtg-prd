@@ -41,8 +41,8 @@ MAX_RETRIES = int(get_secret("max_retries", "3"))
 SCRYFALL_BULK_TYPE = "default_cards"
 
 # Janela temporal: mesma fonte que cards/sets (secret years_back). card_prices
-# grava seu próprio snapshot independente e aplica o mesmo filtro por
-# releaseDate que cards.py/sets.py usam, sem depender da execução deles.
+# grava seu próprio snapshot independente e filtra pelo released_at da própria
+# impressão (cards filtra pelos sets da janela), sem depender da execução deles.
 YEARS_BACK = int(get_secret("years_back", "5"))
 current_year = datetime.now().year
 cutoff_year = current_year - YEARS_BACK
@@ -81,7 +81,7 @@ CARD_PRICES_SCHEMA = StructType([
 def _to_price_record(card):
     # Landing zone captura o catálogo de preços como a Scryfall devolve, sem
     # tentar casar com os arquivos de `cards` já gravados no S3 - esse join
-    # (1:1 por id da impressão) fica pra Silver/Gold, não pra Stage.
+    # (1:1 por id da impressão) fica pra Gold, não pra Stage.
     prices = card.get("prices", {}) or {}
     image_uris = card.get("image_uris")
     return {
@@ -102,7 +102,7 @@ def _to_price_record(card):
 
 
 def fetch_price_records():
-    # Mesmo padrão de cards.py/sets.py: 1 request pro índice do Bulk Data +
+    # Mesmo padrão de cards.py: 1 request pro índice do Bulk Data +
     # 1 pro catálogo inteiro, sem requisição por carta.
     resp = http_get_with_retry(f"{SCRYFALL_API_URL}/bulk-data", headers=SCRYFALL_HEADERS, retries=MAX_RETRIES)
     entry = next(e for e in resp.json()["data"] if e["type"] == SCRYFALL_BULK_TYPE)

@@ -92,9 +92,8 @@ def create_manual_config(catalog_name, s3_bucket, s3_silver_prefix=None):
         'schema_bronze': "bronze",
         'schema_silver': "silver",
         's3_bucket': s3_bucket,
-        # get_secret e nao a string crua: prd e dev dividem o bucket, entao
-        # sem o override de S3_SILVER_PREFIX os dois gravariam Delta no mesmo
-        # caminho. O argumento explicito continua vencendo.
+        # get_secret e nao a string crua: permite override por ambiente via
+        # MTG_S3_SILVER_PREFIX. O argumento explicito continua vencendo.
         's3_silver_prefix': s3_silver_prefix or get_secret("s3_silver_prefix", "silver")
     }
 
@@ -243,7 +242,7 @@ def save_to_silver(df_final, catalog, schema, table_name, s3_silver_path,
     LOAD: grava df_final na camada Silver (Delta + Unity Catalog).
 
     - Delta ainda não existe no caminho: cria os arquivos (primeira carga).
-    - Delta já existe e key_column informado: MERGE INTO incremental via SQL puro.
+    - Delta já existe e key_column informado: MERGE incremental via DeltaTable.merge (builder da API Python).
     - Delta já existe e sem key_column: overwrite completo (uso explícito do chamador).
     - Em qualquer caso, garante o registro da tabela no Unity Catalog sem nunca
       sobrescrever dados já gravados (CREATE TABLE IF NOT EXISTS).
@@ -257,7 +256,8 @@ def save_to_silver(df_final, catalog, schema, table_name, s3_silver_path,
         order_by_col (str, optional): coluna de recência usada para escolher
             deterministicamente qual linha sobrevive quando o lote tem mais de uma
             linha para a mesma key_column. Sem ela, duplicatas de chave no
-            lote são resolvidas de forma não-determinística, mas ficam logadas.
+            lote são resolvidas por dropDuplicates: sobrevive uma linha arbitrária,
+            sem log das descartadas.
         table_comment (str, optional): descrição de negócio da tabela (ver
             silver_column_docs.py). Combinada com a sinalização de chave única.
         column_comments (dict, optional): {nome_coluna: descrição de negócio}
@@ -309,7 +309,7 @@ def save_to_silver(df_final, catalog, schema, table_name, s3_silver_path,
         key_cols = [key_column] if isinstance(key_column, str) else list(key_column)
 
         # comparação de schema é metadado (sem scan de dados) - só visibilidade;
-        # autoMerge (abaixo) resolve colunas novas sozinho, remoções/mudanças de tipo
+        # withSchemaEvolution() (abaixo) resolve colunas novas sozinho, remoções/mudanças de tipo
         # podem falhar o MERGE e aparecem no log em vez de silenciosas
         current_cols = set(f.name for f in DeltaTable.forPath(spark_session, delta_path).toDF().schema.fields)
         new_cols = set(df_final.columns)
@@ -321,7 +321,7 @@ def save_to_silver(df_final, catalog, schema, table_name, s3_silver_path,
         # match e a linha seria reinserida a cada execução (duplicando o dado).
         merge_condition = " AND ".join(f"silver.{k} <=> novo.{k}" for k in key_cols)
 
-        # withSchemaEvolution() no merge builder: coluna nova some sozinha,
+        # withSchemaEvolution() no merge builder: coluna nova entra sozinha,
         # sem precisar de migração manual. Exige Delta Lake 3.1+ (DBR 15.2+).
         delta_table = DeltaTable.forPath(spark_session, delta_path)
         (

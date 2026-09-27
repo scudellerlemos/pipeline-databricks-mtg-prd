@@ -89,7 +89,7 @@ def test_fetch_price_records_maps_fields():
 
 def test_double_faced_card_keeps_combined_name_as_is():
     # issue #<readequacao>: landing zone não tenta mais casar por nome com os
-    # arquivos de `cards` (isso é join, fica pra Bronze/Silver) - o nome
+    # arquivos de `cards` (isso é join, fica pra Gold) - o nome
     # combinado "A // B" que a Scryfall devolve pra cartas de dupla face é
     # gravado como veio, sem indexar por cada face separadamente.
     cards = [{

@@ -25,7 +25,7 @@ from pyspark.sql.types import *
 # =============================================================================
 
 # /sets da Scryfall devolve o catálogo inteiro (has_more=false) em 1 request
-# só - sem paginação, mesmo padrão usado em cards.py/card_prices.py.
+# só; fetch_all_sets ainda segue next_page por garantia.
 SCRYFALL_API_URL = get_secret("scryfall_api_url")
 SCRYFALL_HEADERS = {"User-Agent": "MTGPipeline/1.0"}
 MAX_RETRIES = int(get_secret("max_retries", "3"))
@@ -68,7 +68,7 @@ SETS_SCHEMA = StructType(
         StructField("releaseDate", StringType(), True),
         StructField("gathererCode", StringType(), True),
         StructField("magicCardsInfoCode", StringType(), True),
-        StructField("booster", StringType(), True),  # Campo original como JSON
+        StructField("booster", StringType(), True),  # legado da magicthegathering.io - sempre None, mantido pelo schema
         StructField("oldCode", StringType(), True),
         StructField("onlineOnly", BooleanType(), True),
         StructField("source", StringType(), True),
@@ -78,14 +78,16 @@ SETS_SCHEMA = StructType(
         StructField("block", StringType(), True),
         StructField("icon_svg_uri", StringType(), True),
     ]
-    # Colunas booster explodidas (até 20 posições para cobrir a maioria dos casos)
+    # booster_0..19: legado da magicthegathering.io (explodia a lista "booster").
+    # A Scryfall não expõe booster: ficam sempre nulas, mantidas pelo schema.
     + [StructField(f"booster_{i}", StringType(), True) for i in range(20)]
 )
 
 # Campos exclusivos da magicthegathering.io (border/mkm_id/mkm_name/gathererCode/
 # magicCardsInfoCode/oldCode/source/booster/booster_N) sem equivalente na Scryfall
-# - ver _to_set_record(). Continuam None pra sempre: TB_BRONZE_SETS.ipynb lê e
-# renomeia cada uma dessas colunas, então elas não podem sumir do schema, mesmo
+# - ver _to_set_record(). Continuam None pra sempre (exceto `source`, que o
+# save_to_parquet sobrescreve com 'scryfall'): a Silver (TB_DIM_COLECOES) lê e
+# renomeia essas colunas (exceto `booster`, mantida só pelo schema), então elas não podem sumir do schema, mesmo
 # nunca tendo dado de origem (README.md - "Imutabilidade").
 _FIELDS_SEM_EQUIVALENTE_SCRYFALL = (
     'border', 'mkm_id', 'mkm_name', 'gathererCode', 'magicCardsInfoCode',
@@ -151,7 +153,7 @@ def _to_set_record(s):
 def fetch_all_sets():
     # GET /sets documenta has_more=false (catálogo inteiro em 1 request), mas
     # segue next_page defensivamente - mesmo padrão de fetch_all_migrations()
-    # em migrations.ipynb, caso a Scryfall passe a paginar esse endpoint.
+    # em migrations.py, caso a Scryfall passe a paginar esse endpoint.
     records = []
     url = f"{SCRYFALL_API_URL}/sets"
     while url:

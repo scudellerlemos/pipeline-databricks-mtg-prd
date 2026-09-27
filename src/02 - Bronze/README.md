@@ -43,7 +43,7 @@ inteira (`MTG_STAGE`) termina, via `run_job_task`.
 ## Segredos necessários (scope `mtg-pipeline`)
 
 ```
-catalog_name       # catálogo Unity Catalog
+catalog_name       # catálogo UC (default mtg_dev; prd usa env MTG_CATALOG_NAME=mtg_prod)
 s3_bucket          # bucket S3
 s3_stage_prefix    # prefixo da camada Stage
 s3_bronze_prefix   # prefixo da camada Bronze

@@ -10,7 +10,7 @@ Use %run ./bronze_utils para importar no notebook, DEPOIS do %run acima.
 Escopo desta camada (Bronze): EL puro (Extract & Load) da Stage (S3/Parquet)
 para Delta, com metadados técnicos de rastreabilidade. Sem regra de negócio,
 sem renomeação/padronização de colunas (isso é Silver), sem deduplicação por
-chave de negócio (o mesmo card_id com price diferente em runs diferentes é
+chave de negócio (o mesmo id de impressão com preço diferente em runs diferentes é
 histórico legítimo, não duplicata) e sem MERGE/upsert (que colapsaria esse
 histórico) - só APPEND. Preserva o schema de origem 1:1, adicionando apenas
 source_file/bronze_run_id/bronze_ingestion_timestamp por cima.
@@ -125,7 +125,7 @@ def log_schema_diff(spark, delta_path, incoming_df):
     if new_cols:
         print(f"[schema] colunas novas neste lote (schema evolution): {new_cols}")
     if missing_cols:
-        print(f"[schema] colunas ausentes neste lote (preservadas como NULL nas linhas existentes): {missing_cols}")
+        print(f"[schema] colunas ausentes neste lote (ficam NULL nas linhas novas; linhas existentes preservadas): {missing_cols}")
     if type_changed:
         print(f"[schema] ALERTA tipos divergentes (a escrita falha se for incompatível de verdade): {type_changed}")
 

@@ -13,10 +13,11 @@ GRAO: uma linha por cotação de preço de uma impressão de carta
 TAMANHO ESPERADO: ~1 linha por impressão por data de coleta, ou seja
 TB_FATO_CARTAS x número de coletas já acumuladas - a tabela cresce ~1x
 TB_FATO_CARTAS por run. Não há fan-out: carta e preço estão no mesmo grão de
-impressão e o join é 1:1 por ID_CARTA. As três tabelas LEFT restantes são
-agregadas ou deduplicadas antes do join pelo mesmo motivo. A premissa é
-verificada de verdade em _declare_primary_key (gold_utils.py), que aborta a
-run se (ID_CARTA, DT_COTACAO) repetir ou vier NULA.
+impressão e cada cotação casa com uma só carta por ID_CARTA. Esclarecimentos e
+migrações são agregados antes do join pelo mesmo motivo; coleções já têm 1
+linha por COD_COLECAO. Se mesmo assim (ID_CARTA, DT_COTACAO) repetir, o
+save_to_gold (gold_utils.py) descarta a repetição com dropDuplicates antes de
+gravar - silenciosamente.
 
 VLR_USD/EUR/TIX são o preço DAQUELA impressão, não do nome da carta - uma
 reimpressão barata e um original caro são linhas distintas com valores
@@ -25,11 +26,12 @@ As colunas _FOIL/_ETCHED são outra cotação da MESMA impressão (foil vale
 múltiplos do não-foil), por isso são colunas e não linhas - um SUM(VLR_USD)
 ignora o valor foil da coleção - some VLR_USD_FOIL à parte se quiser ele.
 
-TABELAS SILVER USADAS (5 de 6):
+TABELAS SILVER USADAS (5 de 7):
 - TB_FATO_CARTAS (driver): 1 linha por impressão de carta.
 - TB_FATO_PRECOS_CARTAS (INNER JOIN por ID_CARTA): histórico de cotação de
-  preço no mesmo grão de impressão desta tabela, juntável 1:1 (ver docstring
-  de TB_FATO_PRECOS_CARTAS.py). INNER porque DT_COTACAO é parte da chave
+  preço no mesmo grão de impressão desta tabela, juntável N:1 por ID_CARTA (uma
+  impressão tem N cotações, uma por DT_INGESTAO - ver docstring de
+  TB_FATO_PRECOS_CARTAS.py). INNER porque DT_COTACAO é parte da chave
   desta tabela Gold - carta sem nenhuma cotação de preço não tem linha
   possível aqui (não há valor artificial pra DT_COTACAO sem mascarar a
   chave). Ver seção de Data Quality abaixo para a contagem de cartas
@@ -47,20 +49,25 @@ TABELAS SILVER USADAS (5 de 6):
   uma migracao"). Agregada ANTES do join (1 linha por ID_CARTA_ANTIGO, mais
   recente vence por DT_EXECUCAO/ID_MIGRACAO) porque a mesma carta pode ter
   mais de um evento de migração na Silver - sem agregar, o LEFT JOIN direto
-  faria fan-out e duplicaria linhas da Gold, quebrando a PK.
+  faria fan-out e duplicaria linhas da Gold (o dropDuplicates do
+  save_to_gold ficaria com uma delas, arbitrária).
 
-TABELA SILVER *NÃO* USADA (1 de 6) - desvio deliberado, documentado:
+TABELAS SILVER *NÃO* USADAS (2 de 7) - desvio deliberado, documentado:
 - TB_DOM_SIMBOLOS: lista de referência de símbolos de mana individuais
-  (COD_SIMBOLO = 1 símbolo, ex. '[U]'), pra decodificar texto de carta
-  (DESC_CUSTO_MANA/DESC_CARTA, que concatena vários símbolos numa string só,
+  (COD_SIMBOLO = 1 símbolo, ex. '[U]'), pra decodificar DESC_CUSTO_MANA
+  (em DESC_CARTA os simbolos basicos ja viraram nomes, ex. [White]; o custo
+  concatena vários símbolos numa string só,
   ex. '[2][U][U]'). Juntar aqui exigiria explodir DESC_CUSTO_MANA em tokens
   individuais - muda o grão desta tabela (carta x cotação) para carta x
   símbolo, o que não serve ao propósito de mercado desta Gold. Tem uso real
   (decodificar/exibir símbolo de mana), só não neste grão - ver conversa da
   auditoria pra decisão sobre expor como tabela Gold separada.
+- TB_PONTE_CARTA_SIMBOLOS: já é o custo de mana explodido (carta x símbolo);
+  mesmo motivo - o grão não é carta x cotação.
 
-REGRA DE NULO (GOLD): categórico/descritivo NULO -> literal 'Nao_Identificado'
-(nunca 'NA'/vazio/hífen). Medida (VLR_USD/EUR/TIX) NULA continua NULA - 0
+REGRA DE NULO (GOLD): NME_COLECAO/NME_BLOCO NULOS (carta sem coleção no LEFT
+JOIN; NME_BLOCO também quando a coleção não tem bloco) -> literal 'Nao_Identificado' (nunca 'NA'/vazio/hífen). Os demais
+categóricos vêm da Silver como estão. Medida (VLR_USD/EUR/TIX) NULA continua NULA - 0
 não é válido pra "sem cotação" (mesma semântica já documentada na Silver).
 QTD_ESCLARECIMENTOS NULO -> 0 (zero é valor real: carta nunca teve ruling).
 Data NULA -> sentinela 1001-01-01. PK (ID_CARTA, DT_COTACAO) nunca é
@@ -162,8 +169,8 @@ def transform_mercado_cartas_gold(df_cartas, df_colecoes, df_precos, df_esclarec
     """)
 
     # 1 linha por ID_CARTA_ANTIGO (a carta pode ter mais de 1 evento de
-    # migracao na Silver) - sem isso o LEFT JOIN abaixo faria fan-out e
-    # duplicaria linha da Gold, quebrando a PK (ID_CARTA, DT_COTACAO).
+    # migracao na Silver) - sem isso o LEFT JOIN abaixo faria fan-out e o
+    # dropDuplicates do save_to_gold ficaria com uma migracao arbitraria.
     spark.sql("""
         CREATE OR REPLACE TEMP VIEW _migracoes_resolvidas AS
         SELECT ID_CARTA_ANTIGO, ID_CARTA_CANONICO
@@ -275,12 +282,14 @@ full_table_name = f"{config['catalog_name']}.{config['schema_gold']}.TB_FATO_MER
 dq_resultados = {}
 try:
     dq_resultados = run_data_quality_checks(spark, full_table_name, {
-        # Chave do fato vinda direto da Silver, sem COALESCE. Linha de preço
-        # sem oracle_id é fato sem chave - não existe valor tolerável.
+        # Chave do fato vinda direto da Silver, sem COALESCE. Linha sem
+        # ID_ORACLE (vem de TB_FATO_CARTAS) é fato sem chave - não existe
+        # valor tolerável.
         "fk_null_id_oracle": f"SELECT COUNT(*) FROM {full_table_name} WHERE ID_ORACLE IS NULL",
 
-        # Todos esses passam por COALESCE ou pela regra de nulo da Silver, então
-        # NULL aqui é a regra tendo falhado, não dado faltando.
+        # NME_COLECAO/NME_BLOCO passam por COALESCE; os demais vêm da Silver.
+        # NULL aqui = dado faltando na origem (ex.: carta sem type_line) ou
+        # regra de nulo falhando - vale olhar antes de seguir.
         "null_residual_categorico": f"""SELECT COUNT(*) FROM {full_table_name}
             WHERE NME_CARTA IS NULL OR NME_TIPO_CARTA IS NULL OR NME_RARIDADE IS NULL
                OR NME_CATEGORIA_COR IS NULL OR COD_CORES IS NULL
@@ -311,7 +320,7 @@ except DataQualityError as erro_dq:
     dq_resultados = erro_dq.resultados
     raise
 finally:
-    # finally e nao depois do try: sem isso a run que aborta no DQ nao deixa
+    # finally e nao depois do try: sem isso a run que aborta no DQ pos-carga nao deixa
     # linha de auditoria nenhuma, e a unica prova do que aconteceu vira o log
     # do cluster - que nao sobrevive ao fim do job.
     record_gold_audit(

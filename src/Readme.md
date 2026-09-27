@@ -40,7 +40,7 @@ Transformar dados brutos da API do Magic: The Gathering em insights estratégico
 
 ┌─────────────────────────────────────────────────────────────┐
 │                    🏛️ UNITY CATALOG                         │
-│              mtg_dev.{bronze|silver|gold}                    │
+│{catalog}.{bronze|silver|gold}  (dev: mtg_dev · prd: mtg_prod)│
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -75,10 +75,10 @@ sem prefixo `TB_BRONZE_`, já que vivem no schema `bronze` do Unity Catalog.
 **Características**:
 - ✅ Dados limpos e padronizados
 - ✅ Enriquecimento com categorias e métricas
-- ✅ Nomenclatura 100% PT-BR com prefixo semântico (Id_, Nme_, Desc_, Cod_, Dt_, Qtd_, Vlr_, Num_, Url_)
+- ✅ Nomenclatura 100% PT-BR com prefixo semântico (ID_, NME_, DESC_, COD_, DT_, ANO_, MES_, QTD_, VLR_, NUM_, FLG_, URL_)
 - ✅ Nomenclatura de tabela DAMA-DMBOK (Fato/Dimensão/Domínio/Ponte)
 - ✅ Qualidade de dados garantida
-- ✅ Transformações em SQL puro, sem UDFs Python
+- ✅ Regras de negócio em SQL, com duas exceções em Python: a normalização de texto (`normalizar_valores`, UDF) e a resolução da cadeia de migrações de ID (`attach_canonical_id` em TB_MOV_MIGRACOES_CARTAS, no driver)
 
 **Tabelas**:
 - 🃏 **TB_FATO_CARTAS** - Cartas enriquecidas
@@ -93,34 +93,34 @@ sem prefixo `TB_BRONZE_`, já que vivem no schema `bronze` do Unity Catalog.
 **Localização**: `src/04 - Gold/`
 
 **Processo**: **AL (Analyze & Load)**
-- **Analyze**: Junção das tabelas Silver e cálculo de indicadores de mercado via SQL (`spark.sql()` sobre temp views)
-- **Load**: `MERGE INTO` idempotente, particionado por ano/mês de cotação
+- **Analyze**: Junção das tabelas Silver (cartas, coleções, preços, esclarecimentos, migrações) via SQL (`spark.sql()` sobre temp views)
+- **Load**: `DeltaTable.merge` (upsert idempotente), particionado por ano/mês de cotação
 - **Dados**: 1 tabela pronta para consumo direto (analista/BI/Genie), sem precisar conhecer Bronze/Silver
 
 **Características**:
-- ✅ Visão única de mercado (catálogo + coleção + preço + esclarecimentos de regras)
+- ✅ Visão única de mercado (catálogo + coleção + preço + esclarecimentos de regras + migrações de ID)
 - ✅ Grão: 1 linha por cotação de preço de uma impressão de carta
 - ✅ Data quality e auditoria por run (`TB_AUDITORIA_GOLD`)
 - ✅ Transformações em SQL puro, sem UDFs Python
 
 **Tabelas**:
-- 📊 **TB_FATO_MERCADO_CARTAS** - Visão única de mercado (catálogo + coleção + preço + esclarecimentos de regras)
+- 📊 **TB_FATO_MERCADO_CARTAS** - Visão única de mercado (catálogo + coleção + preço + esclarecimentos de regras + migrações de ID)
 
 ## 🔄 Fluxo de Dados Completo
 
 ### **1. Ingestão / Stage (01 - Ingestion)**
 ```python
 # Controle de execução: início do run
-run_id = start_run(base_path, "cards", endpoint, params)
+run = start_run("cards", endpoint, params)
 
 # Extração da Scryfall com retry/backoff em 429/5xx
 data = http_get_with_retry(url, headers, timeout, retries)
 
 # Salvamento em Parquet no Stage (snapshot datado, idempotente)
-save_to_parquet(data, f"{base_path}/cards/{year}_{month}_{day}_cards.parquet")
+save_to_parquet(spark, data, "cards", base_path, schema=CARDS_SCHEMA, run=run)  # -> {base_path}/cards/{year}_{month}_{day}_cards.parquet
 
-# Controle de execução: fim do run (SUCCESS/FAILED/PARTIAL)
-finish_run(base_path, "cards", run_id, status="SUCCESS", ...)
+# Controle de execução: fim do run (SUCCESS/FAILED)
+finish_run(run, base_path, status="SUCCESS")
 ```
 
 ### **2. Bronze (02 - Bronze)**
@@ -140,7 +140,7 @@ run_bronze_ingestion(
 ```python
 # Extração da Bronze e transformação via SQL (spark.sql() sobre temp view)
 df_bronze = extract_from_bronze(catalog_name, "cards")
-df_silver = spark.sql("SELECT ... FROM bronze_cards")  # ver Dev/TB_FATO_CARTAS.py
+df_silver = spark.sql("SELECT ... FROM _cards_bronze")  # ver Dev/TB_FATO_CARTAS.py
 # MERGE idempotente na Silver + comentários/PK no Unity Catalog
 save_to_silver(df_silver, catalog_name, "silver", "TB_FATO_CARTAS", s3_silver_path, ...)
 ```
@@ -148,7 +148,7 @@ save_to_silver(df_silver, catalog_name, "silver", "TB_FATO_CARTAS", s3_silver_pa
 ### **4. Gold (04 - Gold)**
 ```python
 # Extração das tabelas Silver e junção via SQL (spark.sql() sobre temp views)
-df_gold = spark.sql("SELECT ... FROM silver_fato_cartas JOIN ...")  # ver Dev/TB_FATO_MERCADO_CARTAS.py
+df_gold = spark.sql("SELECT ... FROM _cartas JOIN _precos ...")  # ver Dev/TB_FATO_MERCADO_CARTAS.py
 # Data quality + MERGE idempotente na Gold + auditoria em TB_AUDITORIA_GOLD
 save_to_gold(df_gold, catalog_name, "gold", "TB_FATO_MERCADO_CARTAS", s3_gold_path, ...)
 ```
@@ -162,19 +162,19 @@ save_to_gold(df_gold, catalog_name, "gold", "TB_FATO_MERCADO_CARTAS", s3_gold_pa
 - **Apache Spark** - Processamento distribuído
 
 ### **Linguagens e APIs**
-- **SQL** - Regras de negócio das camadas Silver e Gold (`spark.sql()` sobre temp views, sem UDFs Python)
+- **SQL** - Regras de negócio das camadas Silver e Gold (`spark.sql()` sobre temp views; na Silver, `normalizar_valores` usa uma UDF pra tirar acento)
 - **Python** - Orquestração (extract/load/save/config)
 - **PySpark** - Leitura/escrita de dados e integração com Delta Lake
 
 ### **Infraestrutura**
-- **AWS S3** - Storage de staging
+- **AWS S3** - Storage das camadas (Parquet da Stage e Delta de Bronze/Silver/Gold)
 - **Databricks Secrets** - Gerenciamento de credenciais
 - **Databricks Clusters** - Computação escalável
 
 ## 📊 Métricas e KPIs do Pipeline
 
 ### **Performance**
-- **Ingestão**: bulk-data em um único download por tabela, sem paginação
+- **Ingestão**: bulk-data em 1 download por tabela (cards/card_prices de `default_cards`, rulings de `rulings`); /sets e /symbology em 1 request; /migrations paginado
 - **Processamento**: Incremental por chaves específicas
 - **Tempo de Execução**: <50 minutos para pipeline completo
 
@@ -210,12 +210,19 @@ save_to_gold(df_gold, catalog_name, "gold", "TB_FATO_MERCADO_CARTAS", s3_gold_pa
 
 ### **Segredos Necessários**
 ```python
-catalog_name           # Nome do catálogo Unity
-s3_bucket             # Bucket S3 para staging
+catalog_name           # Nome do catálogo Unity (opcional: default mtg_dev)
+scryfall_api_url      # URL base da Scryfall API (Stage)
+max_retries           # Tentativas do http_get_with_retry (Stage; default 3)
+years_back            # Janela de anos da Stage (cards/sets/card_prices; default 5)
+s3_bucket             # Bucket S3 base de todas as camadas (stage/bronze/silver/gold)
+s3_stage_prefix       # Prefixo da camada stage
 s3_bronze_prefix      # Prefixo da camada bronze
 s3_silver_prefix      # Prefixo da camada silver
 s3_gold_prefix        # Prefixo da camada gold
 ```
+
+Precedência: env var `MTG_<NOME>` > secret > default; prd injeta
+`MTG_CATALOG_NAME=mtg_prod` e `MTG_S3_BUCKET` via deploy.
 
 ### **Ordem de Execução**
 1. **Ingestão**: `src/01 - Ingestion/` (extração da API)

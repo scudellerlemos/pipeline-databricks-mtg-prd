@@ -31,7 +31,7 @@ SCRYFALL_API_URL = get_secret("scryfall_api_url")
 SCRYFALL_HEADERS = {"User-Agent": "MTGPipeline/1.0"}
 MAX_RETRIES = int(get_secret("max_retries", "3"))
 # rulings = 1 objeto por ruling, referenciando a carta via oracle_id (não por
-# impressão) - mesmo padrão de bulk-data usado por cards.ipynb/card_prices.ipynb.
+# impressão) - mesmo padrão de bulk-data usado por cards.py/card_prices.py.
 SCRYFALL_BULK_TYPE = "rulings"
 
 # Sem filtro years_back aqui: diferente de cards/sets/card_prices (onde a
@@ -56,8 +56,8 @@ RULINGS_SCHEMA = StructType([
 
 def _to_ruling_record(ruling):
     # Landing zone captura a ruling como a Scryfall devolve, referenciada por
-    # oracle_id - o join com as impressões de cards.ipynb (1 oracle_id -> N
-    # impressões) fica pra Bronze/Silver, não pra Stage.
+    # oracle_id - o join com as impressões de cards.py (1 oracle_id -> N
+    # impressões) fica pra Gold, não pra Stage.
     return {
         "oracle_id": ruling.get("oracle_id"),
         "source": ruling.get("source"),
@@ -67,7 +67,7 @@ def _to_ruling_record(ruling):
 
 
 def fetch_ruling_records():
-    # Mesmo padrão de card_prices.ipynb: 1 request pro índice do Bulk Data +
+    # Mesmo padrão de card_prices.py: 1 request pro índice do Bulk Data +
     # 1 pro catálogo inteiro, sem requisição por carta/ruling.
     resp = http_get_with_retry(f"{SCRYFALL_API_URL}/bulk-data", headers=SCRYFALL_HEADERS, retries=MAX_RETRIES)
     entry = next(e for e in resp.json()["data"] if e["type"] == SCRYFALL_BULK_TYPE)

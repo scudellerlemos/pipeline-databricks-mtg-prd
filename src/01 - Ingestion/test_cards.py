@@ -1,7 +1,7 @@
 # ponytail: mesma abordagem de test_card_prices.py - a célula do notebook não
 # é um módulo importável por si só, então carrega o código-fonte da célula
 # "FUNÇÕES ESPECÍFICAS" direto do notebook .py e executa com um `requests`
-# fake (índice de bulk-data + payload jsonl gzipado, ou /sets).
+# fake (índice de bulk-data + payload jsonl gzipado).
 
 import gzip
 import json
@@ -138,7 +138,7 @@ def test_legalities_dict_is_serialized_as_valid_json():
 
 def test_missing_scryfall_only_fields_are_none():
     # foreignNames/printings/originalText/originalType/types/subtypes/
-    # multiverseid/variations não têm equivalente na Scryfall.
+    # multiverseid/variations ficam nulos (legado; multiverse_ids da Scryfall não é mapeado).
     to_card_record, _ = _load_functions(_fake_get_for([]))
     card = {"name": "X", "set": "lea", "rarity": "common", "id": "1"}
     record = to_card_record(card)

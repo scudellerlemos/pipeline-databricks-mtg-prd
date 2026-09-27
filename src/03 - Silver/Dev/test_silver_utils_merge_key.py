@@ -13,15 +13,15 @@ def build_merge_plan(key_column):
 
 
 def test_single_key_column_string():
-    key_cols, condition = build_merge_plan("ID_CARD")
-    assert key_cols == ["ID_CARD"]
-    assert condition == "silver.ID_CARD <=> novo.ID_CARD"
+    key_cols, condition = build_merge_plan("ID_CARTA")
+    assert key_cols == ["ID_CARTA"]
+    assert condition == "silver.ID_CARTA <=> novo.ID_CARTA"
 
 
 def test_composite_key_cardprices_preserves_history():
-    key_cols, condition = build_merge_plan(["ID_CARD", "DT_INGESTION"])
-    assert key_cols == ["ID_CARD", "DT_INGESTION"]
-    assert condition == "silver.ID_CARD <=> novo.ID_CARD AND silver.DT_INGESTION <=> novo.DT_INGESTION"
+    key_cols, condition = build_merge_plan(["ID_CARTA", "DT_INGESTAO"])
+    assert key_cols == ["ID_CARTA", "DT_INGESTAO"]
+    assert condition == "silver.ID_CARTA <=> novo.ID_CARTA AND silver.DT_INGESTAO <=> novo.DT_INGESTAO"
 
 
 def build_tie_break_cols(columns, key_cols, order_by_col):
@@ -30,13 +30,13 @@ def build_tie_break_cols(columns, key_cols, order_by_col):
 
 def test_tie_break_cols_excludes_key_and_order_by():
     cols = build_tie_break_cols(
-        ["NME_CARD", "COD_SET", "DESC_CARD", "DT_INGESTION"], ["NME_CARD", "COD_SET"], "DT_INGESTION"
+        ["NME_CARTA", "COD_COLECAO", "DESC_CARTA", "DT_INGESTAO"], ["NME_CARTA", "COD_COLECAO"], "DT_INGESTAO"
     )
-    assert cols == ["DESC_CARD"]
+    assert cols == ["DESC_CARTA"]
 
 
 def test_tie_break_cols_empty_when_key_and_order_by_cover_all():
-    cols = build_tie_break_cols(["ID_CARD", "DT_INGESTION"], ["ID_CARD"], "DT_INGESTION")
+    cols = build_tie_break_cols(["ID_CARTA", "DT_INGESTAO"], ["ID_CARTA"], "DT_INGESTAO")
     assert cols == []
 
 

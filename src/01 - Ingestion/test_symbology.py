@@ -88,7 +88,7 @@ def test_null_list_fields_stay_none():
     assert record["colors"] == "[]"
 
 def test_fetch_all_symbols_no_pagination_needed():
-    # mesmo padrão de sets.ipynb: /symbology devolve o catálogo inteiro em 1
+    # mesmo padrão de sets.py: /symbology devolve o catálogo inteiro em 1
     # request só (has_more: false) - sem loop de paginação necessário.
     symbols_data = [{"symbol": f"{{S{i}}}", "svg_uri": f"https://x/{i}.svg",
                       "loose_variant": None, "english": f"symbol {i}", "transposable": False,

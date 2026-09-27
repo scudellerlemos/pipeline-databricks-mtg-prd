@@ -1,15 +1,15 @@
 # Databricks notebook source
 # ============================================================================
-# BASE UTILS - Funções compartilhadas entre as camadas Silver e Gold
+# BASE UTILS - Funções compartilhadas entre as camadas Bronze, Silver e Gold
 # ============================================================================
 """
-Módulo base com infraestrutura comum usada por silver_utils.py e gold_utils.py:
-sessão Spark, Unity Catalog e leitura de secrets.
+Módulo base com infraestrutura comum aos notebooks de Bronze, Silver, Gold e ao
+smoke_deploy: sessão Spark, Unity Catalog e leitura de secrets.
 
 ADAPTADO PARA DATABRICKS NOTEBOOKS:
 - dbutils e spark são disponíveis globalmente nos notebooks
-- Importado por silver_utils.py / gold_utils.py via:
-  %run ../../00 - Common/Dev/base_utils
+- Bronze/Silver/Gold carregam via %run "../../00 - Common/Dev/base_utils";
+  o smoke_deploy (mesma pasta) via %run ./base_utils
 """
 
 # ponytail: em Serverless + Git source, %run às vezes executa este arquivo num
@@ -32,14 +32,14 @@ except NameError:
 def config_override(secret_name):
     """Valor por ambiente, vindo de env var, ou None.
 
-    dev e prd dividem workspace E scope de secret: o scope guarda so o que e
-    igual nos dois. O que difere (catalogo, prefixos de S3) chega como env var
+    dev e prd dividem workspace E scope de secret: o scope guarda a config de
+    dev (incluindo o bucket .../dev). O que prd muda (catalogo, bucket) chega como env var
     injetada em spark_env_vars pelo deploy.py, entao a config de producao fica
     versionada no workflow em vez de invisivel num scope.
 
     Precedencia: env var > secret > default do codigo. Nenhuma dessas chaves e
     segredo de verdade - sao config - por isso duplicar o scope inteiro so pra
-    mudar tres valores seria criar sete valores pra manter em sincronia na mao.
+    mudar dois valores (catalogo e bucket) seria criar nove valores pra manter em sincronia na mao.
     """
     return os.environ.get("MTG_" + secret_name.upper()) or None
 
@@ -145,5 +145,5 @@ def get_secret(secret_name, default_value=None, extra_safe_defaults=None):
             return _barra_catalogo_de_dev_em_producao(secret_name, safe_defaults[secret_name])
         else:
             print(f"⚠️ Secret '{secret_name}' não encontrado e sem valor padrão")
-            print(f"💡 Configure o secret ou use create_manual_config()")
+            print(f"💡 Configure o secret no scope ou a env var MTG_<NOME>")
             raise Exception(f"Secret '{secret_name}' not configured and no default available")

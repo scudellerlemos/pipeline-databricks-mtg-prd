@@ -27,34 +27,34 @@ Esclarecimentos oficiais de regras (rulings) publicados pela Wizards/Scryfall pa
   5. Escrita na tabela Delta: `TB_FATO_ESCLARECIMENTOS_CARTAS` (Unity Catalog)
 
 ## 5. Convenção de Nome de Coluna
-Todas as colunas a partir da Silver são em PT-BR, sem acento, com a primeira letra maiúscula e o restante minúsculo, mesma convenção de `TB_FATO_CARTAS`.
+Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS, mesma convenção de `TB_FATO_CARTAS`.
 
 ## 6. Schema Detalhado
 | Nome da Coluna | Tipo | Descrição | Chave |
 |---|---|---|---|
-| Id_esclarecimento | string | Id surrogate (hash SHA-256 determinístico sobre Id_oracle+Nme_emissor+Dt_publicacao+Desc_esclarecimento). A fonte não traz id próprio de registro. | Sim |
-| Id_oracle | string | Oracle id da carta a que este esclarecimento se refere (estável entre impressões). FK para `TB_FATO_CARTAS.Id_oracle`. | Não |
-| Nme_emissor | string | Quem publicou o esclarecimento: 'Wizards' ou 'Scryfall'. | Não |
-| Dt_publicacao | date | Data de publicação do esclarecimento. | Não |
-| Desc_esclarecimento | string | Texto do esclarecimento, notação `[..]`. 'NA' se ausente. | Não |
-| Dt_ingestao | timestamp | Timestamp em que a Stage coletou o registro de esclarecimento. | Não |
-| Nme_fonte | string | Fonte de dados de origem ('scryfall'). 'NA' se ausente. | Não |
-| Desc_url_origem | string | Endpoint/URL da API de origem. | Não |
-| Desc_arquivo_origem | string | Caminho do arquivo Parquet de origem na Stage. | Não |
-| Id_execucao_bronze | string | Id da execução da Bronze que gravou a linha. | Não |
-| Dt_ingestao_bronze | timestamp | Timestamp em que a Bronze processou o registro. | Não |
-| Ano_publicacao | int | Ano derivado de Dt_publicacao (partição física). | Não |
-| Mes_publicacao | int | Mês derivado de Dt_publicacao (partição física). | Não |
+| ID_ESCLARECIMENTO | string | Id surrogate (hash SHA-256 determinístico sobre os valores crus da Bronze: oracle_id, source antes da tradução wotc/scryfall, to_date(published_at) e comment antes da troca de ( ) { } por [ ] - não dá pra recalcular a partir das colunas Silver). A fonte não traz id próprio de registro. | Sim |
+| ID_ORACLE | string | Oracle id da carta a que este esclarecimento se refere (estável entre impressões). FK para `TB_FATO_CARTAS.ID_ORACLE`. | Não |
+| NME_EMISSOR | string | Quem publicou o esclarecimento. **Bug conhecido:** hoje é sempre 'Scryfall' - a Stage sobrescreve `source` com a fonte de linhagem (`ingestion_utils.py`), então o emissor original ('wotc'/'scryfall') se perde antes da Silver. | Não |
+| DT_PUBLICACAO | date | Data de publicação do esclarecimento. | Não |
+| DESC_ESCLARECIMENTO | string | Texto do esclarecimento, notação `[..]`. 'NA' se ausente. | Não |
+| DT_INGESTAO | timestamp | Início da execução da Stage que gravou o registro (mesmo valor em todas as linhas da run). | Não |
+| NME_FONTE | string | Fonte de dados de origem ('Scryfall'). 'NA' se ausente. Lida da mesma coluna `source` que `NME_EMISSOR`. | Não |
+| DESC_URL_ORIGEM | string | Nome lógico da tabela de origem na Stage (sempre `rulings`), não a URL da API. | Não |
+| DESC_ARQUIVO_ORIGEM | string | Caminho do arquivo Parquet de origem na Stage. | Não |
+| ID_EXECUCAO_BRONZE | string | Id da execução da Bronze que gravou a linha. | Não |
+| DT_INGESTAO_BRONZE | timestamp | Timestamp em que a Bronze processou o registro. | Não |
+| ANO_PUBLICACAO | int | Ano derivado de DT_PUBLICACAO (partição física). | Não |
+| MES_PUBLICACAO | int | Mês derivado de DT_PUBLICACAO (partição física). | Não |
 
 ## 7. Chave Única
-`Id_esclarecimento`. Id surrogate: a Bronze `rulings` não traz um id próprio de registro (Scryfall só garante `oracle_id` + `source` + `published_at` + `comment`) - gerado por hash determinístico (`sha2(concat_ws('|', ...), 256)`) sobre essas 4 colunas, garantindo o mesmo id em reprocessamentos do mesmo dado e permitindo declarar `PRIMARY KEY` real (coluna sempre NOT NULL).
+`ID_ESCLARECIMENTO`. Id surrogate: a Bronze `rulings` não traz um id próprio de registro (Scryfall só garante `oracle_id` + `source` + `published_at` + `comment`) - gerado por hash determinístico (`sha2(concat_ws('|', ...), 256)`) sobre essas 4 colunas, garantindo o mesmo id em reprocessamentos do mesmo dado e permitindo declarar `PRIMARY KEY` real (coluna sempre NOT NULL).
 
 ## 8. Regras de Implementação
 - **Filtro temporal:** não aplicado (histórico de esclarecimentos é útil por completo).
-- **Merge incremental:** por `Id_esclarecimento`, desempate por `Dt_ingestao` mais recente.
-- **Particionamento:** por `Ano_publicacao` e `Mes_publicacao`.
-- **Tradução de `Nme_emissor`:** `'wotc'` -> `'Wizards'`, `'scryfall'` -> `'Scryfall'`, demais valores em Title Case.
-- **Regra "sem `( ) { } no dado Silver"`:** `Desc_esclarecimento` converte `{...}`/`(...)` para `[...]`, mesma regra de `TB_FATO_CARTAS`.
+- **Merge incremental:** por `ID_ESCLARECIMENTO`, desempate por `DT_INGESTAO` mais recente.
+- **Particionamento:** por `ANO_PUBLICACAO` e `MES_PUBLICACAO`.
+- **Tradução de `NME_EMISSOR`:** `'wotc'` -> `'Wizards'`, `'scryfall'` -> `'Scryfall'`, demais valores em Title Case. **Bug conhecido:** como a Stage sobrescreve `source` com `'scryfall'` em toda tabela, o ramo `'wotc'` nunca é atingido e o valor gravado é sempre `'Scryfall'`.
+- **Regra "sem `( ) { } no dado Silver"`:** `DESC_ESCLARECIMENTO` converte `{...}`/`(...)` para `[...]`, mesma regra de `TB_FATO_CARTAS`.
 
 ## 9. Histórico de Alterações
 | Data | Responsável | Alteração |
@@ -63,4 +63,4 @@ Todas as colunas a partir da Silver são em PT-BR, sem acento, com a primeira le
 
 ## 10. Observações
 - Pipeline exibe logs detalhados de transformações aplicadas.
-- Junte por `Id_oracle` com `TB_FATO_CARTAS.Id_oracle` para trazer esclarecimentos de uma carta (join fan-out esperado: várias impressões compartilham o mesmo `Id_oracle`, e uma carta pode ter vários esclarecimentos).
+- Junte por `ID_ORACLE` com `TB_FATO_CARTAS.ID_ORACLE` para trazer esclarecimentos de uma carta (join fan-out esperado: várias impressões compartilham o mesmo `ID_ORACLE`, e uma carta pode ter vários esclarecimentos).

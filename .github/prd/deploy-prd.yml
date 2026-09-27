@@ -1,7 +1,7 @@
 name: Deploy produção (MTG)
 
-# ATENCAO: este arquivo NAO roda no repo de dev. A cada merge na main o
-# promote.yml de la copia o snapshot do codigo pro repo de producao (pipeline-databricks-mtg-prd) e poe
+# ATENCAO: este arquivo NAO roda no repo de dev. A cada merge na main que
+# toca codigo, o promote.yml de la copia o snapshot do codigo pro repo de producao (pipeline-databricks-mtg-prd) e poe
 # este arquivo em .github/workflows/deploy-prd.yml. Ele fica versionado no dev
 # porque o desenho dos jobs de prod passa pela mesma revisao que o codigo.
 #
@@ -18,6 +18,10 @@ on:
       tag:
         description: "Tag deste repo a deployar (ex.: prd-20261001-0930-ccae429)"
         required: true
+      rodar:
+        description: "Rodar o MTG_PIPELINE_PRD depois do deploy"
+        type: boolean
+        default: false
 
 # Dois deploys de prod simultaneos deixariam metade dos jobs numa tag e
 # metade noutra. Nao cancela o que ja esta rodando: um deploy pela metade e
@@ -83,8 +87,8 @@ jobs:
           # Config do ambiente: o deploy.py injeta tudo que comeca com MTG_ e
           # nao e knob em spark_env_vars, e get_secret() no notebook resolve
           # env var > secret > default. Por isso NAO existe scope de prd: o
-          # scope "mtg-pipeline" guarda o que e igual nos dois ambientes
-          # (bucket, URL da API, retries) e o que difere esta aqui, versionado.
+          # scope "mtg-pipeline" guarda a config de dev (bucket .../dev, URL da
+          # API, retries) e o que prd muda esta aqui, versionado.
           MTG_ENVIRONMENT: "production"
           MTG_CATALOG_NAME: "mtg_prod"
           # O ambiente ja esta no bucket, nao nos prefixos: dev grava em
@@ -112,6 +116,8 @@ jobs:
         run: python .github/scripts/smoke.py
 
       - name: Resumo
+        env:
+          MTG_ALERT_EMAIL: ${{ vars.MTG_ALERT_EMAIL }}
         run: |
           {
             echo "## Produção atualizada"
@@ -123,3 +129,18 @@ jobs:
             echo "- Smoke test: cluster subiu e gravou no \`mtg_prod\`"
             echo "- Alerta de falha: \`${MTG_ALERT_EMAIL:-NÃO CONFIGURADO}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Codigo novo em prd reprocessa na hora, em vez de esperar a carga
+      # mensal. Silver faz MERGE com dedup, entao rodar a mais nao duplica.
+      # --no-wait: a carga leva mais que o deploy; falha avisa pelo e-mail
+      # de alerta do job, nao por aqui.
+      - name: Rodar o pipeline em produção
+        if: github.event.client_payload.rodar == true || inputs.rodar == true
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          JOB=$(databricks jobs list --name MTG_PIPELINE_PRD -o json | jq -r '.[0].job_id')
+          RUN=$(databricks jobs run-now "$JOB" --no-wait -o json | jq -r .run_id)
+          echo "MTG_PIPELINE_PRD disparado: run $RUN"
+          echo "- Pipeline disparado: run \`$RUN\`" >> "$GITHUB_STEP_SUMMARY"

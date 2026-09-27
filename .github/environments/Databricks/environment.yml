@@ -6,7 +6,8 @@ protection_rules:
   - required_reviewers:
       users: []
       teams: []
-    required_approvals: 1
+    # 0: projeto solo, o merge ja e a decisao (ADR-007).
+    required_approvals: 0
     dismiss_stale_reviews_on_push: true
     allow_dismissals: true
     allow_dismissals_by: []

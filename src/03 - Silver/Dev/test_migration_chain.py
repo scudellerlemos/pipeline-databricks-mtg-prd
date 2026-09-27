@@ -1,5 +1,5 @@
-# ponytail: self-check de lógica pura pra _resolve_id_chain() em TB_MOV_MIGRACOES_CARTAS.ipynb.
-# Não dá pra importar o notebook diretamente (não é um módulo .py, e suas outras funções
+# ponytail: self-check de lógica pura pra _resolve_id_chain() em TB_MOV_MIGRACOES_CARTAS.py.
+# Não dá pra importar o notebook diretamente (é notebook Databricks em formato .py source, e suas outras funções
 # precisam de uma sessão spark viva do Databricks), então isto espelha só a função de
 # resolução de cadeia sob teste.
 

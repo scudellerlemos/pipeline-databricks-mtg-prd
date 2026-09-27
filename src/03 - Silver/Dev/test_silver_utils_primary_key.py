@@ -93,23 +93,23 @@ def test_no_null_declares_constraint_in_order():
 
 
 def test_composite_key_checks_all_columns_in_a_single_scan():
-    spark = FakeSpark(null_counts={"NME_CARTA": 0, "DT_INGESTAO": 0})
+    spark = FakeSpark(null_counts={"ID_CARTA": 0, "DT_INGESTAO": 0})
     declare_primary_key(
         spark, "cat.silver.TB_FATO_PRECOS_CARTAS", "TB_FATO_PRECOS_CARTAS",
-        ["NME_CARTA", "DT_INGESTAO"],
+        ["ID_CARTA", "DT_INGESTAO"],
     )
     # 1 SELECT combinado (não 2) + 2 SET NOT NULL + DROP + ADD = 5
     assert len(spark.calls) == 5
     assert spark.calls[0].count("sum(case when") == 2
-    assert "NME_CARTA" in spark.calls[0] and "DT_INGESTAO" in spark.calls[0]
+    assert "ID_CARTA" in spark.calls[0] and "DT_INGESTAO" in spark.calls[0]
 
 
 def test_composite_key_second_column_null_stops_before_any_ddl():
-    spark = FakeSpark(null_counts={"NME_CARTA": 0, "DT_INGESTAO": 1})
+    spark = FakeSpark(null_counts={"ID_CARTA": 0, "DT_INGESTAO": 1})
     try:
         declare_primary_key(
             spark, "cat.silver.TB_FATO_PRECOS_CARTAS", "TB_FATO_PRECOS_CARTAS",
-            ["NME_CARTA", "DT_INGESTAO"],
+            ["ID_CARTA", "DT_INGESTAO"],
         )
         assert False, "esperava RuntimeError"
     except RuntimeError as e:

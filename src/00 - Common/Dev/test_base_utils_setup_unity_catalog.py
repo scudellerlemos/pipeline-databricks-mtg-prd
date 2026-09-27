@@ -1,4 +1,4 @@
-# ponytail: o retorno bool antigo era ignorado pelos 22 call sites, entao uma
+# ponytail: o retorno bool antigo era ignorado por todos os call sites, entao uma
 # falha de USE/CREATE SCHEMA virava print + notebook seguindo em frente e task
 # verde sem escrita. Estes testes travam a propagacao da excecao.
 
@@ -56,7 +56,8 @@ def test_catalog_failure_propagates():
 
 def test_creates_catalog_when_use_fails():
     # Caminho normal de primeira carga: USE CATALOG falha porque o catalog nao
-    # existe, o fallback cria e da USE de novo. Nao pode estourar.
+    # existe, e o fallback tem que tentar o CREATE CATALOG IF NOT EXISTS
+    # antes de desistir.
     spark = _with_spark(_FakeSpark(fail_on=("USE CATALOG mtg_dev",)))
     try:
         base_utils.setup_unity_catalog("mtg_dev", "bronze")

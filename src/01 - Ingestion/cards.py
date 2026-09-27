@@ -86,8 +86,8 @@ CARDS_SCHEMA = StructType([
     StructField("legalities", StringType(), True),
     StructField("id", StringType(), True),
     # oracle_id identifica a carta (Oracle) através de reimpressões - estável
-    # onde `id` (por impressão) não é. Necessário na Silver pra cruzar com
-    # Bronze migrations e resolver a cadeia de merge/delete de scryfall_id.
+    # onde `id` (por impressão) não é. Usado na Gold pra ligar a carta aos
+    # esclarecimentos (rulings), que referenciam oracle_id.
     StructField("oracle_id", StringType(), True)
 ])
 
@@ -132,6 +132,7 @@ def _to_card_record(card):
         "power": _face_fallback(card, "power"),
         "toughness": _face_fallback(card, "toughness"),
         "layout": card.get("layout"),
+        # Scryfall tem multiverse_ids (lista); nao mapeado, fica o legado nulo
         "multiverseid": None,
         "imageUrl": image_uris.get("normal") if image_uris else None,
         "variations": None,

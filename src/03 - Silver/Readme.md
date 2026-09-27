@@ -26,87 +26,78 @@ Transformar dados estruturados da Bronze em dados limpos, padronizados e enrique
 ## 🔄 Processo TL (Transform & Load)
 
 ### **Transform - Limpeza e Enriquecimento (SQL)**
-As regras de negócio de cada notebook são escritas em SQL puro, executadas via `spark.sql()` sobre temp views (sem UDFs Python):
+As regras de negócio de cada notebook são escritas em SQL puro, num `spark.sql()` com CTEs encadeadas (ex.: `_renomeado` -> `_limpo` -> `_sem_delimitador` em `TB_FATO_CARTAS`). Depois do SQL, `normalizar_valores()` (trim, sem acento via UDF, Title Case, espaço vira `_`; NULO, `''` e `'NA'` passam intactos) padroniza as colunas categóricas, e `TB_MOV_MIGRACOES_CARTAS` resolve a cadeia de ids em Python. As colunas saem em PT-BR, 100% MAIÚSCULAS:
 ```python
-spark.sql("""
-    CREATE OR REPLACE TEMP VIEW _cards_stage2 AS
-    SELECT
-        initcap(trim(NME_CARD)) AS NME_CARD,
-        coalesce(MANA_COST, 0) AS MANA_COST,
-        ...
-    FROM _cards_stage1
+spark.sql(r"""
+    WITH _renomeado AS (
+        SELECT id AS ID_CARTA, name AS NME_CARTA, manaCost AS DESC_CUSTO_MANA,
+               cmc AS QTD_CUSTO_MANA, colors AS COD_CORES, ...
+        FROM ...
+    ),
+    ...
+    SELECT *, CASE ... END AS NME_CATEGORIA_COR
+    FROM _sem_delimitador
 """)
 ```
 
 ### **Load - Carregamento na Silver**
-O carregamento incremental usa `MERGE INTO` em SQL puro (não o builder `DeltaTable.merge()`):
+A primeira carga (Delta inexistente) é `overwrite`. As seguintes usam o merge builder do Delta (`DeltaTable.merge()` com `withSchemaEvolution()`), condição nula-segura `silver.<chave> <=> novo.<chave>` (`save_to_silver` em `silver_utils.py`):
 ```python
-spark.sql(f"""
-    MERGE INTO delta.`{delta_path}` AS target
-    USING _dedup AS source
-    ON {merge_condition}
-    WHEN MATCHED THEN UPDATE SET *
-    WHEN NOT MATCHED THEN INSERT *
-""")
+(
+    DeltaTable.forPath(spark, delta_path).alias("silver")
+    .merge(df_final.alias("novo"), merge_condition)
+    .withSchemaEvolution()
+    .whenMatchedUpdateAll()
+    .whenNotMatchedInsertAll()
+    .execute()
+)
 ```
+Antes do merge há dedup por chave: `row_number()` (ordem por `order_by_col` desc, nulos por último) quando o notebook informa `order_by_col`; senão `dropDuplicates`.
 
 ## 📁 Estrutura dos Notebooks
 
-### 🃏 `Cards.py`
-- **Fonte**: Dados de cartas da Bronze
-- **Chave**: `ID_CARD`
-- **Características**: 
-  - Merge incremental por ID
-  - Filtro temporal de 5 anos
-  - Enriquecimento de tipos, cores, categorias
-  - Padronização de nomes, custos, textos
-  - Particionamento por ano/mês de ingestão
-- **Tipo**: 🎴 Creature/Spell/Artifact (dados temporais)
+São 7 notebooks, orquestrados por `.github/DAGs/silver.yml` (detalhe de cada tabela em [`Documentação/Readme.md`](./Documentação/Readme.md)):
 
-### 📦 `Sets.py`
-- **Fonte**: Dados de expansões da Bronze
-- **Chave**: `COD_SET`
-- **Características**:
-  - Merge incremental por código
-  - Filtro temporal de 5 anos
-  - Enriquecimento de metadados
-  - Particionamento por ano/mês de lançamento
-- **Tipo**: 📦 Expansion Set (dados temporais)
+| Notebook | Chave | `order_by_col` (dedup) | Partição |
+|---|---|---|---|
+| `TB_FATO_CARTAS.py` | `ID_CARTA` | `DT_INGESTAO` | `ANO_INGESTAO`/`MES_INGESTAO` |
+| `TB_DIM_COLECOES.py` | `COD_COLECAO` | — (dropDuplicates) | `ANO_LANCAMENTO`/`MES_LANCAMENTO` |
+| `TB_FATO_PRECOS_CARTAS.py` | `ID_CARTA` + `DT_INGESTAO` | — (dropDuplicates) | `ANO_INGESTAO`/`MES_INGESTAO` |
+| `TB_MOV_MIGRACOES_CARTAS.py` | `ID_MIGRACAO` | `DT_INGESTAO` | `ANO_EXECUCAO`/`MES_EXECUCAO` |
+| `TB_DOM_SIMBOLOS.py` | `COD_SIMBOLO` | — (dropDuplicates) | sem partição |
+| `TB_FATO_ESCLARECIMENTOS_CARTAS.py` | `ID_ESCLARECIMENTO` | `DT_INGESTAO` | `ANO_PUBLICACAO`/`MES_PUBLICACAO` |
+| `TB_PONTE_CARTA_SIMBOLOS.py` | `ID_CARTA` + `NUM_ORDEM_SIMBOLO` | — (dropDuplicates) | sem partição |
 
-### 💰 `Card_Prices.py`
-- **Fonte**: Dados de preços da Bronze
-- **Chave**: `[ID_CARD, DT_INGESTION]`
-- **Características**:
-  - Preços em tempo real (USD, EUR, TIX)
-  - Merge incremental por ID da carta + data de ingestão
-  - Particionamento por ano/mês de referência (`ANO_PART`/`MES_PART`)
-  - Dependência: requer dados de cards já processados
-- **Tipo**: 💰 Market Data (dados dinâmicos)
+`TB_PONTE_CARTA_SIMBOLOS` depende de `TB_FATO_CARTAS` e `TB_DOM_SIMBOLOS` no DAG; as demais rodam independentes.
 
 ## ⚙️ Configurações Necessárias
 
-### 🔐 Segredos do Databricks
-Configure os seguintes segredos no scope `mtg-pipeline`:
+### 🔐 Configuração (env var > secret > default)
+Cada valor é resolvido nesta ordem (`base_utils.py`): env var `MTG_<NOME>` (injetada no deploy) > secret no scope `mtg-pipeline` > default do código.
 ```python
-catalog_name           # Nome do catálogo Unity
-s3_bucket             # Bucket S3 para armazenamento
-s3_silver_prefix      # Prefixo da camada silver
+catalog_name           # MTG_CATALOG_NAME; default mtg_dev (em prd: mtg_prod)
+s3_bucket              # MTG_S3_BUCKET
+s3_silver_prefix       # MTG_S3_SILVER_PREFIX
 ```
+Com `MTG_ENVIRONMENT=production`, resolver o catálogo para `mtg_dev` é bloqueado (erro).
 
 ### Estrutura Unity Catalog
 ```
 {catalog_name}/
 └── silver/
-    ├── cards
-    ├── sets
-    └── card_prices
+    ├── TB_FATO_CARTAS
+    ├── TB_DIM_COLECOES
+    ├── TB_FATO_PRECOS_CARTAS
+    ├── TB_MOV_MIGRACOES_CARTAS
+    ├── TB_DOM_SIMBOLOS
+    ├── TB_FATO_ESCLARECIMENTOS_CARTAS
+    └── TB_PONTE_CARTA_SIMBOLOS
 ```
 
 ## 🔄 Fluxo de Execução
 
 ### 1. **Setup Unity Catalog**
 - Criação do catálogo e schema
-- Configuração de permissões
 - Verificação de estrutura
 
 ### 2. **Transformação Silver**
@@ -135,7 +126,7 @@ s3_silver_prefix      # Prefixo da camada silver
 ## 🛡️ Controle de Qualidade
 
 ### **Validações Implementadas**
-- ✅ **Verificação de dados vazios**
+- ✅ **Verificação de DataFrame nulo** (None; DataFrame vazio não é bloqueado)
 - ✅ **Remoção de duplicatas**
 - ✅ **Compatibilidade de schema**
 - ✅ **Merge incremental**
@@ -143,32 +134,30 @@ s3_silver_prefix      # Prefixo da camada silver
 
 ### **Tratamento de Erros e Recuperação**
 - **Verificação de existência**: Antes de criar/atualizar tabelas
-- **Preservação de modificações**: Não sobrescreve alterações customizadas
+- **Upsert por chave**: linha com chave existente é sobrescrita inteira (`whenMatchedUpdateAll`); só linhas fora do lote atual ficam intocadas
 - **Rollback automático**: Em caso de falha no merge
 - **Logs detalhados**: Para debugging e auditoria
 
 ### **Logs e Monitoramento**
 - **Contagem de registros**: Antes e depois do processamento
-- **Duplicatas removidas**: Quantidade e chave utilizada
-- **Schema compatível**: Colunas utilizadas no merge
-- **Tempo de execução**: Performance do processamento
+- **Schema**: diferença de colunas entre origem e destino é avisada no log
 
 ## 📊 Características dos Dados
 
-### **Dados Temporais (Cards e Sets)**
-- **Filtro**: Últimos 5 anos por padrão
-- **Merge**: Incremental por ID/código
-- **Particionamento**: Por ano/mês baseado em `DT_INGESTION` ou `RELEASE_DATE`
+### **Cartas e Coleções**
+- **Filtro**: só `TB_FATO_CARTAS` filtra (últimos 60 meses de `DT_INGESTAO`); `TB_DIM_COLECOES` não tem filtro na Silver, mas a Stage já restringe a coleções com `releaseDate` >= 1º de janeiro de (ano atual − `years_back`, padrão 5)
+- **Merge**: Incremental por `ID_CARTA` / `COD_COLECAO`
+- **Particionamento**: `ANO_INGESTAO`/`MES_INGESTAO` (cartas) e `ANO_LANCAMENTO`/`MES_LANCAMENTO` (coleções)
 - **Histórico**: Mantido no Delta Lake
 - **Tipo**: 🃏 Creature/Spell/Artifact (dinâmicos)
 
-### **Dados de Preços (Card Prices)**
-- **Filtro**: Baseado em cards existentes (sem filtro temporal direto)
-- **Merge**: Incremental por nome da carta
-- **Particionamento**: Por ano/mês baseado em `DT_INGESTION`
+### **Dados de Preços (`TB_FATO_PRECOS_CARTAS`)**
+- **Grão**: uma cotação por impressão (`ID_CARTA`) por coleta (`DT_INGESTAO`)
+- **Filtro**: nenhum na Silver (não depende de `TB_FATO_CARTAS`); a Stage já restringe a impressões com `releaseDate` >= 1º de janeiro de (ano atual − `years_back`, padrão 5)
+- **Merge**: Incremental por `ID_CARTA` + `DT_INGESTAO`
+- **Particionamento**: `ANO_INGESTAO`/`MES_INGESTAO`
 - **Frequência**: Atualização frequente (preços dinâmicos)
-- **Fonte**: Scryfall API (diferente da MTG API)
-- **Dependência**: Requer dados de cards já processados
+- **Fonte**: Scryfall (todas as tabelas da Silver vêm da Scryfall)
 - **Tipo**: 💰 Market Data (dados dinâmicos)
 
 ### 🎴 **Flavor Text dos Dados**
@@ -178,32 +167,25 @@ s3_silver_prefix      # Prefixo da camada silver
 
 ### **Merge Incremental Inteligente**
 ```python
-spark.sql(f"""
-    MERGE INTO delta.`{delta_path}` AS target
-    USING _dedup AS source
-    ON {merge_condition}
-    WHEN MATCHED THEN UPDATE SET *
-    WHEN NOT MATCHED THEN INSERT *
-""")
+delta_table.alias("silver").merge(df_final.alias("novo"), "silver.ID_CARTA <=> novo.ID_CARTA") \
+    .withSchemaEvolution().whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()
 ```
 
 ### **Compatibilidade e Enriquecimento de Schema**
-- Detecção automática de diferenças de schema
+- Diferença de schema é só logada; coluna nova entra via `withSchemaEvolution()` no merge
 - Renomeação e padronização de colunas
 - Enriquecimento com colunas derivadas (ex: categorias, flags, métricas)
 - Preservação de dados existentes
 
-### **Metadados e Propriedades das Tabelas**
-- **`silver_layer`**: Identificação da camada
-- **`data_source`**: Origem dos dados (mtg_api)
-- **`last_processing_date`**: Data/hora do último processamento
-- **`table_type`**: Tipo da tabela (silver)
-- **`load_mode`**: Modo de carregamento (incremental_merge_enriched)
-- **`partitioning`**: Estratégia de particionamento utilizada
+### **Metadados das Tabelas**
+- **`COMMENT ON TABLE`**: descrição de negócio + "Chave única: ..." (de `silver_column_docs.py`)
+- **`COMMENT` por coluna**: vindo de `silver_column_docs.py`
+- **`PRIMARY KEY`**: sempre declarada na chave; a run falha (RuntimeError) se a chave tiver NULO ou duplicata
+- Nenhuma `TBLPROPERTIES` customizada é gravada
 
 ### **Particionamento das Tabelas**
 - **Dados Temporais**: Particionamento por ano/mês de referência
-- **Dados de Referência**: Particionamento por ano/mês de ingestão
+- **Dados de Referência**: `TB_DIM_COLECOES` por ano/mês de lançamento; `TB_DOM_SIMBOLOS` sem partição
 - **Dados de Preços**: Particionamento por ano/mês de ingestão
 
 ## 🔗 Próximos Passos
@@ -249,25 +231,25 @@ Após o processamento na Silver, os dados estarão disponíveis para:
 ```sql
 SELECT
     ...,
-    CASE WHEN COD_COLORS = 'Colorless' THEN 'Colorless' ... END AS NME_COLOR_CATEGORY
-FROM _cards_stage2
+    CASE WHEN COD_CORES = 'Colorless' THEN 'Colorless' ... END AS NME_CATEGORIA_COR
+FROM _sem_delimitador
 ```
 
 #### **Regra #2: Merge Incremental**
-```sql
-MERGE INTO delta.`{delta_path}` AS target USING _dedup AS source ON silver.id = novo.id
+```python
+# condição nula-segura, uma por coluna da chave
+merge_condition = " AND ".join(f"silver.{k} <=> novo.{k}" for k in key_cols)
 ```
 
 #### **Regra #3: Compatibilidade de Schema**
 ```python
-# Verificação de compatibilidade antes do merge
-compatible_columns = [col for col in df.columns if col in target_schema]
+# Diferença de schema só é logada; coluna nova entra pelo merge
+.merge(df_final.alias("novo"), merge_condition).withSchemaEvolution()
 ```
 
 #### **Regra #4: Logs Estruturados**
 ```python
-print(f"Transformações aplicadas: {transformations}")
-print(f"Merge executado com sucesso")
+print(f"Merge concluído em {full_table_name}.")
 ```
 
 ## 🎴 Galeria Visual - Camada Silver
@@ -300,11 +282,6 @@ print(f"Merge executado com sucesso")
 ### 🏛️ Arquitetura da Silver
 ```
 🏛️ Unity Catalog    🗄️ Delta Lake    📁 Schema Silver    🔐 Governance
-```
-
-### 🎴 Tipos de Dados Processados
-```
-🃏 Cards (Temporais)    📦 Sets (Temporais)    💰 Card Prices (Market Data)
 ```
 
 ### 🔄 Operações de Merge

@@ -25,7 +25,7 @@ em test_migration_chain.py.
 
 CHAVE UNICA: ID_MIGRACAO (id do proprio registro de migracao na Scryfall -
 sempre presente e nunca nulo na fonte, ver save_silver_table no fim do
-notebook) - diferente de TB_FATO_CARTAS, aqui a chave e uma unica coluna NOT
+notebook) - como em TB_FATO_CARTAS, a chave e uma unica coluna NOT
 NULL, Unity Catalog consegue declarar a constraint PRIMARY KEY de verdade.
 
 REGRA "SEM ( ) { } NO DADO SILVER": DESC_NOTA e texto livre da Scryfall e

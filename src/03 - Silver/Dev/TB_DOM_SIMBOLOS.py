@@ -20,11 +20,11 @@ REGRA "SEM ( ) { } NO DADO SILVER" - APLICADA SEM EXCECAO A COD_SIMBOLO:
 - A notacao nativa de simbolo de mana da Scryfall usa chaves (ex.: "{W}",
   "{2/U}") - e notacao legitima do dominio, nao um artefato de serializacao
   como em outras colunas. Mesmo assim, esta tabela segue a MESMA conversao
-  pra colchete ([W], [2/U]) que TB_FATO_CARTAS ja aplica aos mesmos simbolos
-  quando eles aparecem embutidos em DESC_CUSTO_MANA/DESC_CARTA - sem essa
-  consistencia, o mesmo simbolo apareceria com notacao diferente em cada
-  tabela, e a Gold nao conseguiria juntar um token extraido do texto da
-  carta contra COD_SIMBOLO sem antes reconverter a notacao. COD_SIMBOLO
+  pra colchete ([W], [2/U]) que TB_FATO_CARTAS ja aplica em DESC_CUSTO_MANA
+  (em DESC_CARTA os simbolos basicos viram nomes, ex.: [White]/[Tap], e nao
+  casam direto com COD_SIMBOLO) - sem essa consistencia, o mesmo simbolo
+  apareceria com notacao diferente em cada tabela, e a Gold nao conseguiria
+  juntar um token extraido de DESC_CUSTO_MANA contra COD_SIMBOLO sem antes reconverter a notacao. COD_SIMBOLO
   NUNCA recebe normalizar_valor()/Title_Case - so a conversao de chave, sem
   excecao (ver transform_symbology_silver abaixo).
 

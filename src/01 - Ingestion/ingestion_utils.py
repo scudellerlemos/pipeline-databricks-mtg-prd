@@ -6,7 +6,7 @@
 Uso no notebook (Databricks):
     %run ./ingestion_utils
 
-Consolida o boilerplate compartilhado por cards/sets/card_prices. Nome do
+Consolida o boilerplate compartilhado pelos 6 notebooks da Stage. Nome do
 arquivo de staging inclui o dia da execução, então cada run diário grava seu
 próprio arquivo em vez de "pular" o mês inteiro assim que o primeiro arquivo
 daquele mês existisse.
@@ -29,7 +29,8 @@ from pyspark.sql.functions import col, lit, current_timestamp, year, month, when
 # namespace que não herda o `dbutils` implícito do notebook. Puxa do IPython
 # quando isso acontece; fora de um notebook Databricks (ex.: pytest local),
 # get_ipython() é None e o bloco é ignorado, preservando o NameError esperado
-# pelos testes locais (ver test_base_utils_get_secret.py).
+# pelos testes locais (ver test_ingestion_utils.py -
+# test_finish_run_without_dbutils_does_not_raise).
 try:
     dbutils
 except NameError:
@@ -125,7 +126,7 @@ def get_scryfall_set_codes_since(scryfall_api_url, headers, cutoff_date_str, ret
     """
     Códigos (lowercase) das coleções lançadas a partir de cutoff_date_str,
     segundo o /sets da Scryfall - 1 request só, devolve o catálogo inteiro
-    (sem paginação, igual ao fetch_all_sets de sets.ipynb).
+    (não segue next_page, ao contrário do fetch_all_sets de sets.py).
     """
     response = http_get_with_retry(f"{scryfall_api_url}/sets", headers=headers, retries=retries)
     all_sets = response.json()["data"]
@@ -262,7 +263,7 @@ def start_run(table_name, endpoint, params=None):
 
 
 def finish_run(run, base_path, status, error=None):
-    """status: SUCCESS | FAILED | PARTIAL. Grava o JSON de controle e devolve o dict."""
+    """status: SUCCESS | FAILED. Grava o JSON de controle e devolve o dict."""
     started_at = datetime.fromisoformat(run["started_at"])
     finished_at = datetime.now(timezone.utc)
 

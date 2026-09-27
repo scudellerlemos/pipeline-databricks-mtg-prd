@@ -11,32 +11,32 @@ As 3 tabelas Gold anteriores (schema pré-DAMA, colunas em inglês que não exis
 
 ## Modelagem (Silver -> Gold)
 
-`TB_FATO_MERCADO_CARTAS` usa 5 das 7 tabelas Silver. `TB_DOM_SIMBOLOS` e `TB_PONTE_CARTA_SIMBOLOS` existem na Silver (análise por símbolo/cor de mana) mas têm grão incompatível com a Gold (carta x símbolo, não carta x cotação) - não entram na junção.
+`TB_FATO_MERCADO_CARTAS` usa 5 das 7 tabelas Silver. `TB_DOM_SIMBOLOS` e `TB_PONTE_CARTA_SIMBOLOS` existem na Silver (análise por símbolo/cor de mana) mas têm grão incompatível com a Gold (`TB_DOM_SIMBOLOS`: 1 linha por símbolo; `TB_PONTE_CARTA_SIMBOLOS`: carta x símbolo - nenhum é carta x cotação) - não entram na junção.
 
 ```mermaid
 graph TD
     subgraph SILVER["Camada Silver (7 tabelas)"]
-        FATO_CARTAS["TB_FATO_CARTAS<br/>PK: Id_carta"]
-        DIM_COLECOES["TB_DIM_COLECOES<br/>PK: Cod_colecao"]
-        FATO_PRECOS["TB_FATO_PRECOS_CARTAS<br/>PK: Nme_carta + Dt_ingestao"]
-        FATO_ESCLARECIMENTOS["TB_FATO_ESCLARECIMENTOS_CARTAS<br/>PK: Id_esclarecimento"]
-        MOV_MIGRACOES["TB_MOV_MIGRACOES_CARTAS<br/>PK: Id_migracao"]
-        DOM_SIMBOLOS["TB_DOM_SIMBOLOS<br/>PK: Cod_simbolo"]
-        PONTE_SIMBOLOS["TB_PONTE_CARTA_SIMBOLOS<br/>PK: Id_carta + Num_ordem_simbolo<br/>Junta FATO_CARTAS x DOM_SIMBOLOS"]
+        FATO_CARTAS["TB_FATO_CARTAS<br/>PK: ID_CARTA"]
+        DIM_COLECOES["TB_DIM_COLECOES<br/>PK: COD_COLECAO"]
+        FATO_PRECOS["TB_FATO_PRECOS_CARTAS<br/>PK: ID_CARTA + DT_INGESTAO"]
+        FATO_ESCLARECIMENTOS["TB_FATO_ESCLARECIMENTOS_CARTAS<br/>PK: ID_ESCLARECIMENTO"]
+        MOV_MIGRACOES["TB_MOV_MIGRACOES_CARTAS<br/>PK: ID_MIGRACAO"]
+        DOM_SIMBOLOS["TB_DOM_SIMBOLOS<br/>PK: COD_SIMBOLO"]
+        PONTE_SIMBOLOS["TB_PONTE_CARTA_SIMBOLOS<br/>PK: ID_CARTA + NUM_ORDEM_SIMBOLO<br/>Liga FATO_CARTAS a DOM_SIMBOLOS"]
     end
 
     subgraph GOLD["Camada Gold"]
-        GOLD_MERCADO["TB_FATO_MERCADO_CARTAS<br/>PK: Id_carta"]
+        GOLD_MERCADO["TB_FATO_MERCADO_CARTAS<br/>PK: ID_CARTA + DT_COTACAO"]
     end
 
-    FATO_CARTAS -->|"Cod_colecao"| GOLD_MERCADO
-    DIM_COLECOES -->|"Cod_colecao"| GOLD_MERCADO
-    FATO_PRECOS -->|"Nme_carta, ultima cotacao"| GOLD_MERCADO
-    FATO_ESCLARECIMENTOS -->|"Id_oracle, qtd esclarecimentos"| GOLD_MERCADO
-    MOV_MIGRACOES -->|"Id_carta_antigo, resolve Id_carta_canonico"| GOLD_MERCADO
+    FATO_CARTAS -->|"COD_COLECAO"| GOLD_MERCADO
+    DIM_COLECOES -->|"COD_COLECAO"| GOLD_MERCADO
+    FATO_PRECOS -->|"ID_CARTA, toda cotacao (INNER)"| GOLD_MERCADO
+    FATO_ESCLARECIMENTOS -->|"ID_ORACLE, qtd esclarecimentos"| GOLD_MERCADO
+    MOV_MIGRACOES -->|"ID_CARTA_ANTIGO, resolve ID_CARTA_CANONICO"| GOLD_MERCADO
 
-    FATO_CARTAS -.->|"Desc_custo_mana explodido"| PONTE_SIMBOLOS
-    DOM_SIMBOLOS -.->|"Cod_simbolo, FK"| PONTE_SIMBOLOS
+    FATO_CARTAS -.->|"DESC_CUSTO_MANA explodido"| PONTE_SIMBOLOS
+    DOM_SIMBOLOS -.->|"COD_SIMBOLO, FK"| PONTE_SIMBOLOS
 
     classDef used fill:#2f6f4f,stroke:#1b4332,color:#ffffff,stroke-width:2px;
     classDef gold fill:#b8860b,stroke:#7a5c00,color:#ffffff,stroke-width:2px;

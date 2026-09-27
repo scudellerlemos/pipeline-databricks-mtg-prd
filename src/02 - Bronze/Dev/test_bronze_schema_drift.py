@@ -84,7 +84,7 @@ def test_scheme_mismatch_does_not_cause_reprocessing():
     # normalizado em get_already_loaded_files) devolveu s3a:// pro mesmo
     # arquivo - sem normalize_path, isto reprocessaria e duplicaria histórico.
     all_files = ["s3://b/stage/2026_09_14_cards.parquet"]
-    already = {"b/stage/2026_09_14_cards.parquet"}  # já normalizado (sem esquema)
+    already = {normalize_path("s3a://b/stage/2026_09_14_cards.parquet")}
     assert find_new_files(all_files, already) == []
 
 
