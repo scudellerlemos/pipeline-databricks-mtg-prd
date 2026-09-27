@@ -1,0 +1,60 @@
+resources:
+  jobs:
+    # Orquestrador: encadeia os jobs de camada via run_job_task. Cada camada
+    # (Stage, Bronze, Silver, Gold) so comeca quando a anterior termina por
+    # inteiro.
+    #
+    # job_id de cada run_job_task e um placeholder, substituido pelo ID real
+    # do job no deploy (ver deploy.py).
+    MTG_PIPELINE:
+      name: MTG_PIPELINE
+      description: "Orquestrador: Stage -> Bronze -> Silver -> Gold"
+      # Run normal leva ~20min. 4h e "travou": cluster que nao sobe ou task
+      # pendurada num read do Scryfall. Sem isso um run agendado fica RUNNING
+      # pra sempre e o on_failure (injetado pelo deploy) nunca dispara.
+      timeout_seconds: 14400
+      schedule:
+        # Executa 1x/mes, na 1a segunda-feira do mes, as 6h (Quartz: "2#1" =
+        # dia-da-semana 2 (segunda) ocorrencia #1 no mes)
+        quartz_cron_expression: "0 0 6 ? * 2#1"
+        timezone_id: America/Sao_Paulo
+        # PAUSED e o default de proposito: quem carrega o schedule e producao,
+        # que sobe com MTG_PAUSE_STATUS=UNPAUSED. Dev e prd dividem o mesmo
+        # Scryfall - os dois agendados seria bater na API duas vezes pelo mesmo
+        # dado. Dev roda sob demanda, quando alguem esta mexendo.
+        pause_status: PAUSED
+      tasks:
+        - task_key: rodar_stage
+          # Unica task que depende de rede externa (Scryfall). 503 no meio de
+          # um bulk download e a falha mais provavel do pipeline inteiro e a
+          # mais barata de resolver sozinha. As camadas seguintes NAO tem
+          # retry de proposito: erro delas e bug ou DQ, e retry so repete.
+          max_retries: 2
+          min_retry_interval_millis: 300000
+          run_job_task:
+            job_id: "{{MTG_STAGE_JOB_ID}}"
+
+        - task_key: rodar_bronze
+          depends_on:
+            - task_key: rodar_stage
+          run_job_task:
+            job_id: "{{MTG_BRONZE_JOB_ID}}"
+
+        - task_key: rodar_silver
+          depends_on:
+            - task_key: rodar_bronze
+          run_job_task:
+            job_id: "{{MTG_SILVER_JOB_ID}}"
+
+        - task_key: rodar_gold
+          depends_on:
+            - task_key: rodar_silver
+          run_job_task:
+            job_id: "{{MTG_GOLD_JOB_ID}}"
+
+      tags:
+        project: "MTG"
+        environment: "development"
+        team: "data-engineering"
+        api_source: "scryfall"
+        layer: "orquestrador"

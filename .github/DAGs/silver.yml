@@ -1,0 +1,82 @@
+resources:
+  jobs:
+    MTG_SILVER:
+      name: MTG_SILVER
+      description: "Camada Silver do pipeline de Magic: The Gathering"
+      tasks:
+        - task_key: silver_cartas
+          notebook_task:
+            notebook_path: src/03 - Silver/Dev/TB_FATO_CARTAS
+            source: GIT
+          job_cluster_key: Job_cluster
+
+        - task_key: silver_colecao
+          notebook_task:
+            notebook_path: src/03 - Silver/Dev/TB_DIM_COLECOES
+            source: GIT
+          job_cluster_key: Job_cluster
+
+        - task_key: silver_precos
+          notebook_task:
+            notebook_path: src/03 - Silver/Dev/TB_FATO_PRECOS_CARTAS
+            source: GIT
+          job_cluster_key: Job_cluster
+
+        - task_key: silver_migracoes
+          notebook_task:
+            notebook_path: src/03 - Silver/Dev/TB_MOV_MIGRACOES_CARTAS
+            source: GIT
+          job_cluster_key: Job_cluster
+
+        - task_key: silver_simbolos
+          notebook_task:
+            notebook_path: src/03 - Silver/Dev/TB_DOM_SIMBOLOS
+            source: GIT
+          job_cluster_key: Job_cluster
+
+        - task_key: silver_esclarecimentos
+          notebook_task:
+            notebook_path: src/03 - Silver/Dev/TB_FATO_ESCLARECIMENTOS_CARTAS
+            source: GIT
+          job_cluster_key: Job_cluster
+
+        # Ponte carta x simbolo de mana - Silver->Silver, le TB_FATO_CARTAS
+        # (custo de mana ja limpo) e TB_DOM_SIMBOLOS (catalogo de simbolos).
+        - task_key: silver_ponte_simbolos
+          depends_on:
+            - task_key: silver_cartas
+            - task_key: silver_simbolos
+          notebook_task:
+            notebook_path: src/03 - Silver/Dev/TB_PONTE_CARTA_SIMBOLOS
+            source: GIT
+          job_cluster_key: Job_cluster
+
+      job_clusters:
+        - job_cluster_key: Job_cluster
+          new_cluster:
+            spark_version: "15.4.x-scala2.12"
+            # Instance pool: instancias on-demand ja provisionadas, o cluster
+            # so precisa instalar o runtime Spark, entao sobe bem mais rapido.
+            instance_pool_id: "0925-163505-peep89-pool-mgfqrcwi"
+            driver_instance_pool_id: "0925-163505-peep89-pool-mgfqrcwi"
+            autoscale:
+              min_workers: 1
+              max_workers: 2
+            spark_env_vars:
+              PYSPARK_PYTHON: "/databricks/python3/bin/python3"
+            spark_conf:
+              spark.databricks.delta.preview.enabled: "true"
+              spark.databricks.delta.optimizeWrite.enabled: "true"
+              spark.databricks.delta.autoCompact.enabled: "true"
+
+      git_source:
+        git_url: "https://github.com/scudellerlemos/pipeline-databricks-mtg-dev"
+        git_provider: "gitHub"
+        git_branch: "main"
+
+      tags:
+        project: "MTG"
+        environment: "development"
+        team: "data-engineering"
+        api_source: "scryfall"
+        layer: "silver"

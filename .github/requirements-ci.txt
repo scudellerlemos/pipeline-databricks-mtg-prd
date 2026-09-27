@@ -1,0 +1,6 @@
+# Dependencias Python do CI e do deploy de producao. O workflow do repo -prd
+# instala daqui, na tag promovida: dependencia nova entra so neste arquivo.
+pyyaml==6.0.2
+pytest==8.3.3
+ruff==0.6.9
+requests==2.32.3

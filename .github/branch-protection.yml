@@ -1,0 +1,26 @@
+# Configuração de proteção da branch main
+branch_protection:
+  main:
+    required_status_checks:
+      strict: true
+      contexts:
+        - "validate"
+    enforce_admins: false
+    required_pull_request_reviews:
+      # 0: projeto solo, sem outro reviewer disponível. Com 1 aqui, toda PR
+      # fica bloqueada e só mergeia via bypass de admin - atrito sem ganho.
+      required_approving_review_count: 0
+      dismiss_stale_reviews: true
+      require_code_owner_reviews: false
+      require_last_push_approval: false
+    restrictions:
+      users: []
+      teams: []
+    allow_force_pushes: false
+    allow_deletions: false
+    block_creations: false
+    required_conversation_resolution: true
+    require_signed_commits: false
+    require_linear_history: false
+    lock_branch: false
+    allow_fork_syncing: true 

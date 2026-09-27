@@ -1,0 +1,77 @@
+resources:
+  jobs:
+    MTG_BRONZE:
+      name: MTG_BRONZE
+      description: "Camada Bronze - EL puro da Stage (S3/Parquet) para Delta"
+      # Sem depends_on entre as tasks: nao tem dependencia de dado entre elas,
+      # rodam todas em paralelo. A ordem em relacao a Stage e garantida pelo
+      # orquestrador (MTG_PIPELINE).
+      tasks:
+        - task_key: bronze_cartas
+          notebook_task:
+            notebook_path: src/02 - Bronze/Dev/cards
+            source: GIT
+          job_cluster_key: Job_cluster
+
+        - task_key: bronze_colecao
+          notebook_task:
+            notebook_path: src/02 - Bronze/Dev/sets
+            source: GIT
+          job_cluster_key: Job_cluster
+
+        - task_key: bronze_precos
+          notebook_task:
+            notebook_path: src/02 - Bronze/Dev/card_prices
+            source: GIT
+          job_cluster_key: Job_cluster
+
+        - task_key: bronze_simbologia
+          notebook_task:
+            notebook_path: src/02 - Bronze/Dev/symbology
+            source: GIT
+          job_cluster_key: Job_cluster
+
+        - task_key: bronze_regras
+          notebook_task:
+            notebook_path: src/02 - Bronze/Dev/rulings
+            source: GIT
+          job_cluster_key: Job_cluster
+
+        - task_key: bronze_migracoes
+          notebook_task:
+            notebook_path: src/02 - Bronze/Dev/migrations
+            source: GIT
+          job_cluster_key: Job_cluster
+
+      job_clusters:
+        - job_cluster_key: Job_cluster
+          new_cluster:
+            spark_version: "15.4.x-scala2.12"
+            # Instance pool: instancias on-demand ja provisionadas, o cluster
+            # so precisa instalar o runtime Spark, entao sobe bem mais rapido.
+            instance_pool_id: "0925-163505-peep89-pool-mgfqrcwi"
+            driver_instance_pool_id: "0925-163505-peep89-pool-mgfqrcwi"
+            # Autoscale: numero de workers cresce conforme a carga das 6
+            # tasks rodando em paralelo, sem manter 2 workers ligados o tempo
+            # todo.
+            autoscale:
+              min_workers: 1
+              max_workers: 2
+            spark_env_vars:
+              PYSPARK_PYTHON: "/databricks/python3/bin/python3"
+            spark_conf:
+              spark.databricks.delta.preview.enabled: "true"
+              spark.databricks.delta.optimizeWrite.enabled: "true"
+              spark.databricks.delta.autoCompact.enabled: "true"
+
+      git_source:
+        git_url: "https://github.com/scudellerlemos/pipeline-databricks-mtg-dev"
+        git_provider: "gitHub"
+        git_branch: "main"
+
+      tags:
+        project: "MTG"
+        environment: "development"
+        team: "data-engineering"
+        api_source: "scryfall"
+        layer: "bronze"

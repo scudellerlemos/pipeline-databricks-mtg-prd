@@ -1,0 +1,26 @@
+name: Databricks
+description: Environment para deploy no Databricks
+
+# Proteção do environment
+protection_rules:
+  - required_reviewers:
+      users: []
+      teams: []
+    required_approvals: 1
+    dismiss_stale_reviews_on_push: true
+    allow_dismissals: true
+    allow_dismissals_by: []
+    require_code_owner_reviews: false
+    required_workflow_runs: []
+    restrict_reviews_to_dismissable_only: false
+
+# Secrets necessários
+secrets:
+  - DATABRICKS_HOST
+  - DATABRICKS_TOKEN
+
+# Variáveis de ambiente
+variables:
+  ENVIRONMENT: development
+  PIPELINE_NAME: MTG_PIPELINE
+  WORKSPACE: databricks 
