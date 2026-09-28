@@ -279,8 +279,10 @@ precisa ser tabela física para consumo (BI/Genie).
   não cresce com o histórico).
 - A fato recebe MERGE só com: cotações com `DT_INGESTAO` maior que a última
   `DT_COTACAO` da Gold, mais todo o histórico das cartas que mudaram na
-  dimensão (`EXCEPT` da dimensão nova contra a versão anterior, via time
-  travel).
+  dimensão (`EXCEPT` da dimensão recalculada contra a gravada).
+- A fato é gravada antes da dimensão: se a fato falhar, a dimensão gravada
+  segue a antiga e a próxima run acha as mesmas cartas mudadas. Sem time
+  travel: o log Delta guarda 30 dias e a run é mensal (28-35 dias).
 - Carga completa (`overwrite`) quando a fato ou a dimensão não existem, a
   dimensão mudou de colunas, ou com o widget `rebuild=true`.
 

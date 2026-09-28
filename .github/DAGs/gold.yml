@@ -5,6 +5,7 @@ resources:
       name: MTG_GOLD
       description: "Camada Gold do pipeline de Magic: The Gathering"
       tasks:
+        # Grava gold.TB_FATO_MERCADO_CARTAS e depois gold.TB_DIM_CARTAS (ver docstring do notebook).
         - task_key: gold_mercado_cartas
           notebook_task:
             notebook_path: src/04 - Gold/Dev/TB_FATO_MERCADO_CARTAS

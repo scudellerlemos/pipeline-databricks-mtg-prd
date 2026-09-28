@@ -224,10 +224,17 @@ def salvar_em_parquet(spark, dados, nome_tabela, caminho_base, esquema=None,
         except Exception:
             existentes = set()
 
+        def completo(nome_arquivo):
+            # Escrita que caiu no meio deixa a pasta sem _SUCCESS: regrava em vez de pular.
+            try:
+                return any(f.name == "_SUCCESS" for f in dbutils.fs.ls(f"{caminho_base}/{nome_tabela}/{nome_arquivo}"))
+            except Exception:
+                return False
+
         pendentes = []
         for (ano_particao, mes_particao), qtd in contagens.items():
             nome_arquivo = nome_arquivo_parquet(ano_particao, mes_particao, data_execucao, nome_tabela)
-            if nome_arquivo in existentes:
+            if nome_arquivo in existentes and completo(nome_arquivo):
                 print(f"Arquivo {nome_arquivo} já existe - pulando (já ingerido hoje)")
                 if execucao is not None:
                     execucao["files_skipped"] = execucao.get("files_skipped", 0) + 1
@@ -236,7 +243,9 @@ def salvar_em_parquet(spark, dados, nome_tabela, caminho_base, esquema=None,
 
         def gravar(pendente):
             ano_particao, mes_particao, nome_arquivo, _ = pendente
-            df.filter((col("partition_year") == ano_particao) & (col("partition_month") == mes_particao))               .drop("partition_year", "partition_month")               .write.mode("overwrite").format("parquet").save(f"{caminho_base}/{nome_tabela}/{nome_arquivo}")
+            (df.filter((col("partition_year") == ano_particao) & (col("partition_month") == mes_particao))
+               .drop("partition_year", "partition_month")
+               .write.mode("overwrite").format("parquet").save(f"{caminho_base}/{nome_tabela}/{nome_arquivo}"))
             return pendente
 
         # ponytail: 8 escritas simultâneas no driver single-node; subir se o cluster crescer.

@@ -5,7 +5,7 @@
 - **Script:** `Dev/TB_FATO_MERCADO_CARTAS.py`
 - **Utilitários:** `Dev/gold_utils.py` (config/extract/load/auditoria, mesmo padrão de `silver_utils.py`)
 - **Comentários de negócio:** `Dev/gold_column_docs.py` (fonte única, aplicada via `COMMENT ON TABLE`/`ALTER COLUMN...COMMENT`)
-- **Documentação:** [`Documentação/TB_FATO_MERCADO_CARTAS/Readme.md`](./Documentação/TB_FATO_MERCADO_CARTAS/Readme.md)
+- **Documentação:** [`TB_FATO_MERCADO_CARTAS`](./Documentação/TB_FATO_MERCADO_CARTAS/Readme.md), [`TB_DIM_CARTAS`](./Documentação/TB_DIM_CARTAS/Readme.md)
 
 ## Modelagem (Silver -> Gold)
 

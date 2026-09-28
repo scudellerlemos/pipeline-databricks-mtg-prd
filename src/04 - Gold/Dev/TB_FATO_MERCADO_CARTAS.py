@@ -11,9 +11,13 @@ sobre mercado de cartas, montada a partir da Silver. Duas tabelas:
   catálogo, não cresce com o histórico).
 - gold.TB_FATO_MERCADO_CARTAS: silver.TB_FATO_PRECOS_CARTAS x TB_DIM_CARTAS.
   Incremental: MERGE só com (a) cotações depois da última da Gold e (b) todo
-  o histórico das cartas cujo atributo mudou na dimensão (EXCEPT contra a
-  versão anterior dela, via time travel). Assim migração de id e ruling
+  o histórico das cartas cujo atributo mudou na dimensão (EXCEPT da
+  dimensão recalculada contra a gravada). Assim migração de id e ruling
   novo chegam às cotações antigas sem recalcular tudo.
+
+A fato é gravada antes da dimensão: se a fato falhar, a dimensão gravada
+continua a antiga e a próxima run acha as mesmas cartas mudadas. Sem time
+travel de propósito: o log Delta guarda 30 dias e a run é mensal.
 
 Carga completa (overwrite das duas) quando: fato ou dimensão ainda não
 existem, a dimensão mudou de colunas, ou widget rebuild=true. O incremental
@@ -176,7 +180,7 @@ def transformar_dim_cartas(df_cartas, df_colecoes, df_precos, df_esclarecimentos
 
 
 def consulta_fato_mercado(catalogo, filtro=""):
-    """SELECT de TB_FATO_MERCADO_CARTAS: preços da Silver x TB_DIM_CARTAS já gravada."""
+    """SELECT de TB_FATO_MERCADO_CARTAS: preços da Silver x dimensão recalculada (_dim_cartas)."""
     return f"""
         SELECT
             d.ID_CARTA,
@@ -205,7 +209,7 @@ def consulta_fato_mercado(catalogo, filtro=""):
             p.ANO_INGESTAO AS ANO_COTACAO,
             p.MES_INGESTAO AS MES_COTACAO
         FROM {catalogo}.silver.TB_FATO_PRECOS_CARTAS p
-        INNER JOIN {catalogo}.gold.TB_DIM_CARTAS d ON p.ID_CARTA = d.ID_CARTA
+        INNER JOIN _dim_cartas d ON p.ID_CARTA = d.ID_CARTA
         {filtro}
     """
 
@@ -259,31 +263,16 @@ try:
     )
     corte = spark.table(nome_completo_tabela).agg({"DT_COTACAO": "max"}).first()[0] if incremental else None
     incremental = corte is not None
-    if incremental:
-        # Lido antes do overwrite: é a versão contra a qual a dimensão nova é comparada.
-        versao_dim_anterior = spark.sql(f"DESCRIBE HISTORY {nome_dim} LIMIT 1").first()["version"]
-        print(f"Incremental: cotações depois de {corte} + cartas que mudaram desde a versão {versao_dim_anterior} de TB_DIM_CARTAS")
-    else:
-        print("Carga completa de TB_FATO_MERCADO_CARTAS")
+    print(f"Incremental: cotações depois de {corte} + cartas que mudaram na dimensão" if incremental
+          else "Carga completa de TB_FATO_MERCADO_CARTAS")
+    df_dim.createOrReplaceTempView("_dim_cartas")
 
     try:
-        processador.salvar_tabela_gold(
-            df_dim,
-            coluna_chave="ID_CARTA",
-            comentario_tabela=obter_comentario_tabela("TB_DIM_CARTAS"),
-            comentarios_colunas=obter_comentarios_colunas("TB_DIM_CARTAS")
-        )
-
         if incremental:
-            spark.sql(f"""
-                CREATE OR REPLACE TEMP VIEW _cartas_mudaram AS
-                SELECT DISTINCT ID_CARTA FROM (
-                    SELECT * FROM {nome_dim}
-                    EXCEPT
-                    SELECT * FROM {nome_dim} VERSION AS OF {versao_dim_anterior}
-                )
-            """)
-            print(f"Cartas novas ou com atributo alterado: {spark.table('_cartas_mudaram').count()}")
+            # Materializado: a dimensão gravada é sobrescrita logo depois da fato.
+            df_mudaram = df_dim.exceptAll(spark.table(nome_dim)).select("ID_CARTA").distinct().cache()
+            df_mudaram.createOrReplaceTempView("_cartas_mudaram")
+            print(f"Cartas novas ou com atributo alterado: {df_mudaram.count()}")
             consulta = consulta_fato_mercado(
                 config['catalog_name'],
                 "WHERE p.DT_INGESTAO > :corte OR p.ID_CARTA IN (SELECT ID_CARTA FROM _cartas_mudaram)",
@@ -302,6 +291,14 @@ try:
             comentario_tabela=obter_comentario_tabela("TB_FATO_MERCADO_CARTAS"),
             comentarios_colunas=obter_comentarios_colunas("TB_FATO_MERCADO_CARTAS"),
             incremental=incremental
+        )
+
+        # Depois da fato (ver docstring): falha na fato não adianta a dimensão.
+        processador.salvar_tabela_gold(
+            df_dim,
+            coluna_chave="ID_CARTA",
+            comentario_tabela=obter_comentario_tabela("TB_DIM_CARTAS"),
+            comentarios_colunas=obter_comentarios_colunas("TB_DIM_CARTAS")
         )
     except RuntimeError:
         status_auditoria = "FALHA_DQ_PK"
