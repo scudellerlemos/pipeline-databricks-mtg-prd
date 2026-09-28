@@ -258,7 +258,6 @@ def transformar_cartas_silver(df):
         "NME_CATEGORIA_COR",
     ])
 
-    logger.info(f"Transformação Cartas concluída: {df_silver.count()} registros")
     return df_silver
 
 # =============================================================================

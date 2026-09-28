@@ -3,21 +3,36 @@
 # CAMADA GOLD - MERCADO DE CARTAS - MAGIC: THE GATHERING
 # =============================================================================
 """
-Constrói a tabela Gold TB_FATO_MERCADO_CARTAS: tabela única de consumo
-(analista/BI/Genie) sobre mercado de cartas, montada a partir da Silver.
+Constrói TB_FATO_MERCADO_CARTAS, visão única de consumo (analista/BI/Genie)
+sobre mercado de cartas, montada a partir da Silver. Duas tabelas:
 
-GRÃO: uma linha por cotação de preço de uma impressão de carta.
-Chave: (ID_CARTA, DT_COTACAO). Cresce ~1x TB_FATO_CARTAS por coleta.
-Esclarecimentos e migrações são agregados antes do join para não haver
-fan-out; chave duplicada faz o salvar_na_gold abortar antes de gravar.
+- gold.TB_DIM_CARTAS: 1 linha por ID_CARTA com os atributos atuais
+  (catálogo, coleção, rulings, migração). Overwrite a cada run (~tamanho do
+  catálogo, não cresce com o histórico).
+- gold.TB_FATO_MERCADO_CARTAS: silver.TB_FATO_PRECOS_CARTAS x TB_DIM_CARTAS.
+  Incremental: MERGE só com (a) cotações depois da última da Gold e (b) todo
+  o histórico das cartas cujo atributo mudou na dimensão (EXCEPT contra a
+  versão anterior dela, via time travel). Assim migração de id e ruling
+  novo chegam às cotações antigas sem recalcular tudo.
+
+Carga completa (overwrite das duas) quando: fato ou dimensão ainda não
+existem, a dimensão mudou de colunas, ou widget rebuild=true. O incremental
+não apaga: cotação removida da Silver (correção manual) só sai da Gold com
+rebuild=true.
+
+GRÃO da fato: uma linha por cotação de preço de uma impressão de carta.
+Chave: (ID_CARTA, DT_COTACAO), única por construção: PK da Silver de preços
+(ID_CARTA, DT_INGESTAO) x PK de TB_DIM_CARTAS (ID_CARTA). Esclarecimentos e
+migrações são agregados antes do join para não haver fan-out; chave
+duplicada na dimensão faz o salvar_na_gold abortar antes de gravar.
 
 VLR_USD/EUR/TIX são o preço daquela impressão (reimpressão e original são
 linhas distintas). _FOIL/_ETCHED são outra cotação da mesma impressão, por
 isso são colunas: SUM(VLR_USD) não inclui foil.
 
 TABELAS SILVER USADAS:
-- TB_FATO_CARTAS (driver): 1 linha por impressão.
-- TB_FATO_PRECOS_CARTAS (INNER JOIN por ID_CARTA): N cotações por impressão.
+- TB_FATO_CARTAS (driver da dimensão): 1 linha por impressão.
+- TB_FATO_PRECOS_CARTAS (INNER JOIN por ID_CARTA, na fato): N cotações por impressão.
   INNER porque DT_COTACAO é parte da chave; cartas sem cotação ficam de fora
   (contadas no DQ pré-join).
 - TB_DIM_COLECOES (LEFT JOIN por COD_COLECAO): nome, bloco e data de
@@ -27,10 +42,6 @@ TABELAS SILVER USADAS:
 - TB_MOV_MIGRACOES_CARTAS (agregada por ID_CARTA_ANTIGO, LEFT JOIN): indica se
   a Scryfall fundiu/removeu o ID_CARTA e qual é o id vigente. Uma carta pode
   ter vários eventos; vence o mais recente (DT_EXECUCAO, ID_MIGRACAO).
-
-TABELAS SILVER NÃO USADAS:
-- TB_DOM_SIMBOLOS e TB_PONTE_CARTA_SIMBOLOS: grão carta x símbolo de mana,
-  juntar aqui mudaria o grão desta tabela.
 
 REGRA DE NULO:
 - NME_COLECAO/NME_BLOCO nulos (sem coleção ou sem bloco) -> 'Nao_Identificado'.
@@ -77,10 +88,11 @@ def configurar_logging():
     return logging.getLogger(__name__)
 
 
-def transformar_mercado_cartas_gold(df_cartas, df_colecoes, df_precos, df_esclarecimentos, df_migracoes):
-    """Join das 5 tabelas Silver (ver docstring do notebook) via spark.sql sobre temp views."""
+def transformar_dim_cartas(df_cartas, df_colecoes, df_precos, df_esclarecimentos, df_migracoes):
+    """TB_DIM_CARTAS: cartas + coleção + rulings + migração, via spark.sql sobre
+    temp views. df_precos só entra no DQ pré-join."""
     logger = logging.getLogger(__name__)
-    logger.info("Iniciando join Gold - TB_FATO_MERCADO_CARTAS...")
+    logger.info("Iniciando join Gold - TB_DIM_CARTAS...")
 
     df_cartas.createOrReplaceTempView("_cartas")
     df_colecoes.createOrReplaceTempView("_colecoes")
@@ -88,7 +100,7 @@ def transformar_mercado_cartas_gold(df_cartas, df_colecoes, df_precos, df_esclar
     df_esclarecimentos.createOrReplaceTempView("_esclarecimentos")
     df_migracoes.createOrReplaceTempView("_migracoes")
 
-    # DATA QUALITY (pré-join): conta o que o INNER JOIN descarta, antes de gravar nada.
+    # DATA QUALITY (pré-join): conta o que o INNER JOIN da fato descarta, antes de gravar nada.
     executar_checagens_dq(spark, "pré-join", {
         # Carta sem cotação. Sempre > 0: carta nova chega antes do preço dela.
         "cartas_excluidas_sem_cotacao_de_preco": ("""
@@ -138,7 +150,7 @@ def transformar_mercado_cartas_gold(df_cartas, df_colecoes, df_precos, df_esclar
         WHERE rn = 1
     """)
 
-    df_final = spark.sql("""
+    return spark.sql("""
         SELECT
             c.ID_CARTA,
             c.ID_ORACLE,
@@ -152,6 +164,33 @@ def transformar_mercado_cartas_gold(df_cartas, df_colecoes, df_precos, df_esclar
             COALESCE(col.NME_COLECAO, 'Nao_Identificado') AS NME_COLECAO,
             COALESCE(col.NME_BLOCO, 'Nao_Identificado') AS NME_BLOCO,
             COALESCE(col.DT_LANCAMENTO, DATE'1001-01-01') AS DT_LANCAMENTO_COLECAO,
+            COALESCE(e.QTD_ESCLARECIMENTOS, 0) AS QTD_ESCLARECIMENTOS,
+            COALESCE(e.DT_ULTIMO_ESCLARECIMENTO, DATE'1001-01-01') AS DT_ULTIMO_ESCLARECIMENTO,
+            COALESCE(mig.ID_CARTA_CANONICO, c.ID_CARTA) AS ID_CARTA_CANONICO,
+            CASE WHEN mig.ID_CARTA_ANTIGO IS NOT NULL THEN 'Sim' ELSE 'Nao' END AS FLG_ID_CARTA_MIGRADO
+        FROM _cartas c
+        LEFT JOIN _colecoes col ON c.COD_COLECAO = col.COD_COLECAO
+        LEFT JOIN _esclarecimentos_agg e ON c.ID_ORACLE = e.ID_ORACLE
+        LEFT JOIN _migracoes_resolvidas mig ON c.ID_CARTA = mig.ID_CARTA_ANTIGO
+    """)
+
+
+def consulta_fato_mercado(catalogo, filtro=""):
+    """SELECT de TB_FATO_MERCADO_CARTAS: preços da Silver x TB_DIM_CARTAS já gravada."""
+    return f"""
+        SELECT
+            d.ID_CARTA,
+            d.ID_ORACLE,
+            d.NME_CARTA,
+            d.NME_TIPO_CARTA,
+            d.NME_RARIDADE,
+            d.NME_CATEGORIA_COR,
+            d.COD_CORES,
+            d.QTD_CUSTO_MANA,
+            d.COD_COLECAO,
+            d.NME_COLECAO,
+            d.NME_BLOCO,
+            d.DT_LANCAMENTO_COLECAO,
             p.DT_INGESTAO AS DT_COTACAO,
             p.VLR_USD,
             p.VLR_USD_FOIL,
@@ -159,21 +198,16 @@ def transformar_mercado_cartas_gold(df_cartas, df_colecoes, df_precos, df_esclar
             p.VLR_EUR,
             p.VLR_EUR_FOIL,
             p.VLR_TIX,
-            COALESCE(e.QTD_ESCLARECIMENTOS, 0) AS QTD_ESCLARECIMENTOS,
-            COALESCE(e.DT_ULTIMO_ESCLARECIMENTO, DATE'1001-01-01') AS DT_ULTIMO_ESCLARECIMENTO,
-            COALESCE(mig.ID_CARTA_CANONICO, c.ID_CARTA) AS ID_CARTA_CANONICO,
-            CASE WHEN mig.ID_CARTA_ANTIGO IS NOT NULL THEN 'Sim' ELSE 'Nao' END AS FLG_ID_CARTA_MIGRADO,
-            YEAR(p.DT_INGESTAO) AS ANO_COTACAO,
-            MONTH(p.DT_INGESTAO) AS MES_COTACAO
-        FROM _cartas c
-        INNER JOIN _precos p ON c.ID_CARTA = p.ID_CARTA
-        LEFT JOIN _colecoes col ON c.COD_COLECAO = col.COD_COLECAO
-        LEFT JOIN _esclarecimentos_agg e ON c.ID_ORACLE = e.ID_ORACLE
-        LEFT JOIN _migracoes_resolvidas mig ON c.ID_CARTA = mig.ID_CARTA_ANTIGO
-    """)
-
-    logger.info(f"Transformação Gold concluída: {df_final.count()} registros")
-    return df_final
+            d.QTD_ESCLARECIMENTOS,
+            d.DT_ULTIMO_ESCLARECIMENTO,
+            d.ID_CARTA_CANONICO,
+            d.FLG_ID_CARTA_MIGRADO,
+            p.ANO_INGESTAO AS ANO_COTACAO,
+            p.MES_INGESTAO AS MES_COTACAO
+        FROM {catalogo}.silver.TB_FATO_PRECOS_CARTAS p
+        INNER JOIN {catalogo}.gold.TB_DIM_CARTAS d ON p.ID_CARTA = d.ID_CARTA
+        {filtro}
+    """
 
 
 # =============================================================================
@@ -181,6 +215,9 @@ def transformar_mercado_cartas_gold(df_cartas, df_colecoes, df_precos, df_esclar
 # =============================================================================
 config = criar_config_manual(obter_segredo("catalog_name"), obter_segredo("s3_bucket"))
 configurar_unity_catalog(config['catalog_name'], config['schema_gold'])
+
+# rebuild=true: recalcula a fato inteira (ex.: depois de apagar dado da Silver).
+dbutils.widgets.text("rebuild", "false")
 
 # COMMAND ----------
 
@@ -195,7 +232,9 @@ dq_resultados = {}
 qtd_lidos = 0
 qtd_processados = 0
 nome_completo_tabela = f"{config['catalog_name']}.{config['schema_gold']}.TB_FATO_MERCADO_CARTAS"
-processador = GoldTableProcessor("TB_FATO_MERCADO_CARTAS", config)
+nome_dim = f"{config['catalog_name']}.{config['schema_gold']}.TB_DIM_CARTAS"
+processador = GoldTableProcessor("TB_DIM_CARTAS", config)
+processador_fato = GoldTableProcessor("TB_FATO_MERCADO_CARTAS", config)
 
 try:
     df_cartas = processador.extrair_da_silver("TB_FATO_CARTAS")
@@ -209,16 +248,60 @@ try:
         + df_esclarecimentos.count() + df_migracoes.count()
     )
 
-    df_gold = transformar_mercado_cartas_gold(df_cartas, df_colecoes, df_precos, df_esclarecimentos, df_migracoes)
-    qtd_processados = df_gold.count()
+    # cache: checagem de duplicata e escrita reusam o join.
+    df_dim = transformar_dim_cartas(df_cartas, df_colecoes, df_precos, df_esclarecimentos, df_migracoes).cache()
+
+    incremental = (
+        dbutils.widgets.get("rebuild").lower() != "true"
+        and spark.catalog.tableExists(nome_completo_tabela)
+        and spark.catalog.tableExists(nome_dim)
+        and spark.table(nome_dim).columns == df_dim.columns
+    )
+    corte = spark.table(nome_completo_tabela).agg({"DT_COTACAO": "max"}).first()[0] if incremental else None
+    incremental = corte is not None
+    if incremental:
+        # Lido antes do overwrite: é a versão contra a qual a dimensão nova é comparada.
+        versao_dim_anterior = spark.sql(f"DESCRIBE HISTORY {nome_dim} LIMIT 1").first()["version"]
+        print(f"Incremental: cotações depois de {corte} + cartas que mudaram desde a versão {versao_dim_anterior} de TB_DIM_CARTAS")
+    else:
+        print("Carga completa de TB_FATO_MERCADO_CARTAS")
 
     try:
         processador.salvar_tabela_gold(
-            df_gold,
+            df_dim,
+            coluna_chave="ID_CARTA",
+            comentario_tabela=obter_comentario_tabela("TB_DIM_CARTAS"),
+            comentarios_colunas=obter_comentarios_colunas("TB_DIM_CARTAS")
+        )
+
+        if incremental:
+            spark.sql(f"""
+                CREATE OR REPLACE TEMP VIEW _cartas_mudaram AS
+                SELECT DISTINCT ID_CARTA FROM (
+                    SELECT * FROM {nome_dim}
+                    EXCEPT
+                    SELECT * FROM {nome_dim} VERSION AS OF {versao_dim_anterior}
+                )
+            """)
+            print(f"Cartas novas ou com atributo alterado: {spark.table('_cartas_mudaram').count()}")
+            consulta = consulta_fato_mercado(
+                config['catalog_name'],
+                "WHERE p.DT_INGESTAO > :corte OR p.ID_CARTA IN (SELECT ID_CARTA FROM _cartas_mudaram)",
+            )
+            df_fato = spark.sql(consulta, args={"corte": corte})
+        else:
+            df_fato = spark.sql(consulta_fato_mercado(config['catalog_name']))
+
+        # cache: count, checagem de duplicata e escrita reusam o join.
+        df_fato = df_fato.cache()
+        qtd_processados = df_fato.count()
+        processador_fato.salvar_tabela_gold(
+            df_fato,
             colunas_particao=["ANO_COTACAO", "MES_COTACAO"],
             coluna_chave=["ID_CARTA", "DT_COTACAO"],
             comentario_tabela=obter_comentario_tabela("TB_FATO_MERCADO_CARTAS"),
-            comentarios_colunas=obter_comentarios_colunas("TB_FATO_MERCADO_CARTAS")
+            comentarios_colunas=obter_comentarios_colunas("TB_FATO_MERCADO_CARTAS"),
+            incremental=incremental
         )
     except RuntimeError:
         status_auditoria = "FALHA_DQ_PK"
@@ -279,4 +362,4 @@ finally:
 # =============================================================================
 print(f"Processamento concluído com sucesso!")
 print(f"Registros processados: {qtd_processados}")
-print(f"Colunas finais: {df_gold.columns}")
+print(f"Colunas finais: {df_fato.columns}")

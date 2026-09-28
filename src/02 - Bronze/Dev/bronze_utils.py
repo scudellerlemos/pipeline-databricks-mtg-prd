@@ -24,6 +24,19 @@ from pyspark.sql.functions import col, current_timestamp, lit
 
 # Sem %run aninhado aqui: o lint estático de notebooks só resolve %run de um
 # nível. Por isso o notebook importa base_utils antes deste arquivo.
+# Função de um arquivo %run'd não enxerga nomes de outro %run'd, então as de
+# base_utils vêm do namespace do IPython (mesmo esquema de silver_utils.py).
+try:
+    validar_contrato_esquema, campos_do_esquema, aplicar_documentacao_tabela
+except NameError:
+    try:
+        import IPython
+        _namespace_usuario = IPython.get_ipython().user_ns
+        validar_contrato_esquema = _namespace_usuario["validar_contrato_esquema"]
+        campos_do_esquema = _namespace_usuario["campos_do_esquema"]
+        aplicar_documentacao_tabela = _namespace_usuario["aplicar_documentacao_tabela"]
+    except Exception:
+        pass
 
 
 # ============================================================================
@@ -78,36 +91,22 @@ def obter_arquivos_ja_carregados(spark, caminho_delta):
 
 
 # ============================================================================
-# SCHEMA - LOG DE DIVERGÊNCIA (SEM BLOQUEAR EVOLUÇÃO ADITIVA)
+# SCHEMA - CONTRATO (validar_contrato_esquema em base_utils)
 # ============================================================================
 
-def logar_diferenca_esquema(spark, caminho_delta, df_entrada):
-    """Loga colunas novas/ausentes/com tipo diferente vs. a tabela Bronze atual.
-
-    Só log, não bloqueia: colunas novas entram via mergeSchema, ausentes ficam
-    NULL nas linhas novas. Tipo incompatível o próprio Delta rejeita na escrita.
-    """
+def validar_esquema_bronze(spark, caminho_delta, nome_completo_tabela, df_entrada,
+                           comentarios_colunas=None, permitir_quebra_esquema=False):
+    """Coluna nova da Stage entra via mergeSchema; coluna removida ou com tipo
+    alterado aborta antes do append (senão viraria NULL nas linhas novas)."""
     try:
-        campos_existentes = {f.name: str(f.dataType) for f in spark.read.format("delta").load(caminho_delta).schema.fields}
+        campos_atuais = campos_do_esquema(spark.read.format("delta").load(caminho_delta).schema)
     except AnalysisException:
-        campos_existentes = {}
-
-    campos_entrada = {f.name: str(f.dataType) for f in df_entrada.schema.fields}
-    colunas_novas = sorted(c for c in campos_entrada if c not in campos_existentes)
-    colunas_ausentes = sorted(c for c in campos_existentes if c not in campos_entrada)
-    tipos_divergentes = sorted(
-        c for c in campos_entrada
-        if c in campos_existentes and campos_entrada[c] != campos_existentes[c]
+        campos_atuais = {}
+    validar_contrato_esquema(
+        nome_completo_tabela, campos_atuais, campos_do_esquema(df_entrada.schema),
+        colunas_documentadas=list(comentarios_colunas) if comentarios_colunas else None,
+        permitir_quebra=permitir_quebra_esquema,
     )
-
-    if not campos_existentes:
-        print(f"[schema] primeira carga - {len(campos_entrada)} colunas")
-    if colunas_novas:
-        print(f"[schema] colunas novas neste lote (schema evolution): {colunas_novas}")
-    if colunas_ausentes:
-        print(f"[schema] colunas ausentes neste lote (ficam NULL nas linhas novas; linhas existentes preservadas): {colunas_ausentes}")
-    if tipos_divergentes:
-        print(f"[schema] ALERTA tipos divergentes (a escrita falha se for incompatível de verdade): {tipos_divergentes}")
 
 
 # ============================================================================
@@ -132,26 +131,6 @@ def _escapar_string_sql(valor):
     # Spark SQL não aceita '' (padrão ANSI) como aspa literal - dá
     # ParseException. O escape que funciona é com backslash.
     return valor.replace("\\", "\\\\").replace("'", "\\'")
-
-
-def aplicar_documentacao_tabela(spark, nome_completo_tabela, comentario_tabela=None, comentarios_colunas=None):
-    """Aplica COMMENT ON TABLE / ALTER COLUMN...COMMENT no Unity Catalog.
-
-    Só metadado, então roda em toda execução pra manter a tabela em sincronia
-    com bronze_column_docs.py. Colunas que ainda não existem na tabela são
-    ignoradas.
-    """
-    if comentario_tabela:
-        spark.sql(f"COMMENT ON TABLE {nome_completo_tabela} IS '{_escapar_string_sql(comentario_tabela)}'")
-
-    if comentarios_colunas:
-        colunas_existentes = {f.name for f in spark.table(nome_completo_tabela).schema.fields}
-        for nome_coluna, comentario in comentarios_colunas.items():
-            if nome_coluna in colunas_existentes:
-                spark.sql(
-                    f"ALTER TABLE {nome_completo_tabela} "
-                    f"ALTER COLUMN `{nome_coluna}` COMMENT '{_escapar_string_sql(comentario)}'"
-                )
 
 
 def anexar_na_bronze(df, caminho_delta, nome_completo_tabela, comentario_tabela=None):
@@ -218,12 +197,15 @@ def finalizar_execucao_bronze(dbutils, execucao, caminho_s3_bronze, status, erro
 def executar_ingestao_bronze(spark, dbutils, catalogo, esquema,
                              nome_tabela_bronze, nome_tabela_stage,
                              caminho_s3_stage, caminho_s3_bronze,
-                             comentario_tabela=None, comentarios_colunas=None):
-    """EL completo: arquivos novos da Stage -> metadados técnicos -> append na
-    Bronze -> tabela no Unity Catalog -> controle de execução.
+                             comentario_tabela=None, comentarios_colunas=None,
+                             permitir_quebra_esquema=False):
+    """EL completo: arquivos novos da Stage -> metadados técnicos -> contrato de
+    schema -> append na Bronze -> tabela no Unity Catalog -> controle de execução.
 
     Sem arquivo novo, não escreve nada e fecha como SUCCESS com 0 registros.
-    comentario_tabela/comentarios_colunas vêm de bronze_column_docs.py.
+    comentario_tabela/comentarios_colunas vêm de bronze_column_docs.py; as
+    colunas documentadas são o contrato de nomes da tabela.
+    permitir_quebra_esquema: True só para remover coluna ou mudar tipo de propósito.
     """
     execucao = iniciar_execucao_bronze(nome_tabela_bronze)
     caminho_delta = f"{caminho_s3_bronze}/{nome_tabela_bronze}"
@@ -254,7 +236,8 @@ def executar_ingestao_bronze(spark, dbutils, catalogo, esquema,
 
         execucao["records_read"] = df.count()
 
-        logar_diferenca_esquema(spark, caminho_delta, df)
+        validar_esquema_bronze(spark, caminho_delta, nome_completo_tabela, df,
+                               comentarios_colunas, permitir_quebra_esquema)
         anexar_na_bronze(df, caminho_delta, nome_completo_tabela, comentario_tabela)
         aplicar_documentacao_tabela(spark, nome_completo_tabela, comentario_tabela, comentarios_colunas)
 

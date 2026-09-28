@@ -13,8 +13,8 @@ schema, particionamento): [`Documentação/README.md`](./Documentação/README.m
 
 ## Tabelas
 
-6 tabelas, uma por origem da Stage: `cards`, `sets`, `card_prices`,
-`symbology`, `rulings`, `migrations` - sem prefixo `TB_BRONZE_`, já que estão
+5 tabelas, uma por origem da Stage: `cards`, `sets`, `card_prices`,
+`rulings`, `migrations` - sem prefixo `TB_BRONZE_`, já que estão
 dentro do schema `bronze` no Unity Catalog (`{catalog}.bronze.cards`, etc.).
 Cada uma tem um notebook em [`Dev/`](./Dev) (mesmo nome da tabela) que só
 configura os parâmetros e chama `executar_ingestao_bronze(...)`, definida em
@@ -29,7 +29,6 @@ qualquer momento sem duplicar dados (só processa arquivos novos da Stage):
 cards.py
 sets.py
 card_prices.py
-symbology.py
 rulings.py
 migrations.py
 ```
@@ -38,7 +37,7 @@ Não há ordem de dependência entre eles (cada um lê só sua própria origem n
 Stage). Vivem no job `MTG_BRONZE` (`.github/DAGs/bronze.yml`), sem
 depends_on entre si nem com a Stage - o job `MTG_PIPELINE`
 (`.github/DAGs/pipeline.yml`) só aciona a Bronze inteira depois que a Stage
-inteira (`MTG_STAGE`) termina, via `run_job_task`.
+inteira termina (as tasks das camadas são embutidas num job só no deploy).
 
 ## Segredos necessários (scope `mtg-pipeline`)
 

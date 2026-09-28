@@ -1,4 +1,4 @@
-# Testa a lógica de bronze_utils.py (idempotência e diff de schema) em Python
+# Testa a lógica de bronze_utils.py (idempotência e listagem da Stage) em Python
 # puro: bronze_utils depende de pyspark/dbutils/%run e não importa fora do
 # Databricks. Limitação: as funções abaixo são cópias - mudou lá, atualizar aqui.
 
@@ -32,17 +32,6 @@ def encontrar_arquivos_novos(todos_arquivos_stage, arquivos_ja_carregados):
     return [f for f in todos_arquivos_stage if normalizar_caminho(f) not in ja_carregados]
 
 
-def diferenca_esquema(campos_existentes, campos_entrada):
-    """Espelho da classificação de logar_diferenca_esquema: novas/ausentes/tipos divergentes."""
-    colunas_novas = sorted(c for c in campos_entrada if c not in campos_existentes)
-    colunas_ausentes = sorted(c for c in campos_existentes if c not in campos_entrada)
-    tipos_divergentes = sorted(
-        c for c in campos_entrada
-        if c in campos_existentes and campos_entrada[c] != campos_existentes[c]
-    )
-    return {"novas": colunas_novas, "ausentes": colunas_ausentes, "tipos_divergentes": tipos_divergentes}
-
-
 def test_sem_arquivos_novos_quando_tudo_ja_carregado():
     todos_arquivos = ["s3://b/stage/2026_09_14_cards.parquet"]
     ja_carregados = {"b/stage/2026_09_14_cards.parquet"}
@@ -70,28 +59,6 @@ def test_esquema_de_uri_diferente_nao_reprocessa():
     todos_arquivos = ["s3://b/stage/2026_09_14_cards.parquet"]
     ja_carregados = {normalizar_caminho("s3a://b/stage/2026_09_14_cards.parquet")}
     assert encontrar_arquivos_novos(todos_arquivos, ja_carregados) == []
-
-
-def test_diferenca_esquema_detecta_colunas_novas_e_ausentes():
-    existentes = {"id": "StringType()", "name": "StringType()"}
-    entrada = {"id": "StringType()", "set": "StringType()"}
-    resultado = diferenca_esquema(existentes, entrada)
-    assert resultado["novas"] == ["set"]
-    assert resultado["ausentes"] == ["name"]
-    assert resultado["tipos_divergentes"] == []
-
-
-def test_diferenca_esquema_detecta_mudanca_de_tipo():
-    existentes = {"cmc": "DoubleType()"}
-    entrada = {"cmc": "StringType()"}
-    resultado = diferenca_esquema(existentes, entrada)
-    assert resultado["tipos_divergentes"] == ["cmc"]
-
-
-def test_diferenca_esquema_primeira_carga_tudo_novo():
-    resultado = diferenca_esquema({}, {"id": "StringType()", "name": "StringType()"})
-    assert resultado["novas"] == ["id", "name"]
-    assert resultado["ausentes"] == []
 
 
 def caminho_tabela_stage(caminho_s3_stage, nome_tabela_stage):
@@ -141,9 +108,6 @@ if __name__ == "__main__":
     test_so_arquivos_nao_vistos_sao_novos()
     test_reexecucao_no_mesmo_dia_nao_faz_nada()
     test_esquema_de_uri_diferente_nao_reprocessa()
-    test_diferenca_esquema_detecta_colunas_novas_e_ausentes()
-    test_diferenca_esquema_detecta_mudanca_de_tipo()
-    test_diferenca_esquema_primeira_carga_tudo_novo()
     test_caminho_tabela_stage_e_subpasta_por_tabela()
     test_filtro_arquivos_stage_aceita_diretorios()
     test_diretorio_de_escrita_nao_commitada_e_ignorado()

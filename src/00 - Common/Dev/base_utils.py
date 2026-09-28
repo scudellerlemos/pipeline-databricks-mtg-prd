@@ -144,3 +144,97 @@ def obter_segredo(nome_segredo, valor_padrao=None, padroes_seguros_extras=None):
             print(f"Secret '{nome_segredo}' não encontrado e sem valor padrão")
             print(f"Configure o secret no scope ou a env var MTG_<NOME>")
             raise Exception(f"Secret '{nome_segredo}' not configured and no default available")
+
+# ============================================================================
+# CONTRATO DE SCHEMA
+# ============================================================================
+class ErroContratoEsquema(Exception):
+    """Lote quebra o contrato de schema da tabela - nada foi gravado.
+
+    Não é RuntimeError: a Gold trata RuntimeError do salvar como FALHA_DQ_PK.
+    """
+
+
+def campos_do_esquema(esquema):
+    """{coluna: tipo} de um StructType (df.schema), sem olhar nulabilidade."""
+    return {f.name: f.dataType.simpleString() for f in esquema.fields}
+
+
+def validar_contrato_esquema(nome_tabela, campos_atuais, campos_novos,
+                             colunas_documentadas=None, permitir_quebra=False):
+    """Compara o lote com a tabela antes de gravar. Aborta se quebrar o contrato.
+
+    campos_atuais/campos_novos: {coluna: tipo}; campos_atuais vazio = primeira carga.
+    - Coluna nova entra, com aviso (evolução aditiva).
+    - Coluna removida ou com tipo alterado aborta, a não ser com
+      permitir_quebra=True (mudança intencional, declarada no notebook).
+    - colunas_documentadas (column_docs da camada): o lote tem que ter
+      exatamente essas colunas. Vale mesmo com permitir_quebra.
+
+    Returns:
+        list: colunas novas no lote.
+    """
+    colunas_novas = sorted(set(campos_novos) - set(campos_atuais)) if campos_atuais else []
+    removidas = sorted(set(campos_atuais) - set(campos_novos))
+    tipo_alterado = sorted(
+        f"{c} ({campos_atuais[c]} -> {campos_novos[c]})"
+        for c in campos_novos if c in campos_atuais and campos_novos[c] != campos_atuais[c]
+    )
+
+    problemas = []
+    if removidas and not permitir_quebra:
+        problemas.append(f"colunas removidas {removidas}")
+    if tipo_alterado and not permitir_quebra:
+        problemas.append(f"tipo alterado {tipo_alterado}")
+    if colunas_documentadas is not None:
+        sem_doc = sorted(set(campos_novos) - set(colunas_documentadas))
+        doc_sem_coluna = sorted(set(colunas_documentadas) - set(campos_novos))
+        if sem_doc:
+            problemas.append(f"colunas sem documentação no column_docs {sem_doc}")
+        if doc_sem_coluna:
+            problemas.append(f"colunas documentadas que o lote não tem {doc_sem_coluna}")
+
+    if problemas:
+        raise ErroContratoEsquema(f"Contrato de schema de {nome_tabela} quebrado: " + "; ".join(problemas))
+    if removidas or tipo_alterado:
+        print(f"[schema] {nome_tabela}: quebra permitida - removidas={removidas} tipo_alterado={tipo_alterado}")
+    if colunas_novas:
+        print(f"[schema] {nome_tabela}: colunas novas {colunas_novas}")
+    return colunas_novas
+
+
+# ============================================================================
+# DOCUMENTAÇÃO NO UNITY CATALOG
+# ============================================================================
+def escapar_string_sql(valor):
+    # Spark SQL não aceita '' (padrão ANSI) como aspa literal - dá
+    # ParseException. O escape que funciona é com backslash.
+    return valor.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def comentarios_a_aplicar(comentarios_atuais, comentarios_desejados):
+    """{coluna: comentario} do que precisa de ALTER: coluna existe na tabela e o
+    comentário atual é diferente. Coluna que a tabela ainda não tem fica de fora."""
+    return {
+        coluna: comentario
+        for coluna, comentario in comentarios_desejados.items()
+        if coluna in comentarios_atuais and comentarios_atuais[coluna] != comentario
+    }
+
+
+def aplicar_documentacao_tabela(spark, nome_completo_tabela, comentario_tabela=None, comentarios_colunas=None):
+    """Aplica COMMENT ON TABLE / ALTER COLUMN...COMMENT no Unity Catalog, só no
+    que mudou. Cada ALTER é um commit Delta (4-20s com o driver ocupado):
+    reaplicar tudo custava 5-7 min por camada em toda execução."""
+    if comentario_tabela and spark.catalog.getTable(nome_completo_tabela).description != comentario_tabela:
+        spark.sql(f"COMMENT ON TABLE {nome_completo_tabela} IS '{escapar_string_sql(comentario_tabela)}'")
+
+    if comentarios_colunas:
+        atuais = {f.name: f.metadata.get("comment") for f in spark.table(nome_completo_tabela).schema.fields}
+        mudaram = comentarios_a_aplicar(atuais, comentarios_colunas)
+        for nome_coluna, comentario in mudaram.items():
+            spark.sql(
+                f"ALTER TABLE {nome_completo_tabela} "
+                f"ALTER COLUMN `{nome_coluna}` COMMENT '{escapar_string_sql(comentario)}'"
+            )
+        print(f"[doc] {nome_completo_tabela}: {len(mudaram)} comentário(s) de coluna atualizado(s)")

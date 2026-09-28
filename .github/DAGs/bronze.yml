@@ -24,12 +24,6 @@ resources:
             source: GIT
           job_cluster_key: Job_cluster
 
-        - task_key: bronze_simbologia
-          notebook_task:
-            notebook_path: src/02 - Bronze/Dev/symbology
-            source: GIT
-          job_cluster_key: Job_cluster
-
         - task_key: bronze_regras
           notebook_task:
             notebook_path: src/02 - Bronze/Dev/rulings
@@ -46,17 +40,25 @@ resources:
         - job_cluster_key: Job_cluster
           new_cluster:
             spark_version: "15.4.x-scala2.12"
-            # Pool mtg-pipeline-pool-dbr154: runtime 15.4 pre-carregado. Com
-            # min_idle_instances=0, fora dos 10 min de idle a instancia e provisionada na hora.
-            instance_pool_id: "0925-163505-peep89-pool-mgfqrcwi"
-            driver_instance_pool_id: "0925-163505-peep89-pool-mgfqrcwi"
-            # Autoscale: workers acompanham a carga das 6 tasks em paralelo.
-            autoscale:
-              min_workers: 1
-              max_workers: 2
+            # Single-node: o gargalo medido era o driver (CPU 80-99%, swap ate 85%)
+            # com os workers ociosos. m5d.2xlarge = 8 vCPU / 32 GB, tudo no driver.
+            # Sem instance pool: com min_idle 0 ele nao reaproveitava instancia entre
+            # camadas (setup de ~200s em todas no run de 27/09).
+            node_type_id: "m5d.2xlarge"
+            num_workers: 0
+            # Explicito: sem isso o single-node sobe sem modo de acesso (sem Unity
+            # Catalog) e le o S3 anonimo -> 403. Multi-node caia em SINGLE_USER sozinho.
+            data_security_mode: "SINGLE_USER"
+            aws_attributes:
+              availability: "ON_DEMAND"
+              zone_id: "us-west-2a"
+            custom_tags:
+              ResourceClass: "SingleNode"
             spark_env_vars:
               PYSPARK_PYTHON: "/databricks/python3/bin/python3"
             spark_conf:
+              spark.master: "local[*]"
+              spark.databricks.cluster.profile: "singleNode"
               spark.databricks.delta.preview.enabled: "true"
               spark.databricks.delta.optimizeWrite.enabled: "true"
               spark.databricks.delta.autoCompact.enabled: "true"

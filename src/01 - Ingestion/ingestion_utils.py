@@ -15,6 +15,7 @@ import json
 import os
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import requests
@@ -151,8 +152,8 @@ def _carimbo_da_execucao(execucao):
     """Carimbo unico da execucao, como literal Python.
 
     Nao usar current_timestamp(): salvar_em_parquet faz um .write por particao e
-    o Spark reavalia a expressao a cada action, gerando carimbos diferentes na
-    mesma run. O literal e o mesmo em todas as escritas.
+    o Spark reavalia a expressao a cada action (sem cache, ou se o cache cair),
+    gerando carimbos diferentes na mesma run. O literal e o mesmo em todas as escritas.
     """
     if execucao and execucao.get("started_at"):
         return datetime.fromisoformat(execucao["started_at"])
@@ -160,13 +161,17 @@ def _carimbo_da_execucao(execucao):
 
 
 def salvar_em_parquet(spark, dados, nome_tabela, caminho_base, esquema=None,
-                     coluna_origem_particao=None, data_corte=None, execucao=None):
+                     coluna_origem_particao=None, data_corte=None, execucao=None,
+                     colunas_obrigatorias=None):
     """
     coluna_origem_particao: coluna já presente no dado (ex.: 'releaseDate') usada para
         derivar partition_year/partition_month. Se None, usa a data de ingestão (agora).
     data_corte: se informado, mantém apenas registros com coluna_origem_particao >= data_corte.
     execucao: dict de iniciar_execucao(), opcional - se informado, acumula files_written/
         files_skipped/records_written nele para o controle de execução.
+    colunas_obrigatorias: colunas que não podem vir nulas depois do mapeamento. Um
+        nulo aborta antes de gravar: campo renomeado ou movido na Scryfall vira
+        NULL em silêncio e só estouraria no DQ da Gold.
     """
     if not dados:
         print(f"Nenhum dado para salvar na tabela {nome_tabela}")
@@ -200,38 +205,47 @@ def salvar_em_parquet(spark, dados, nome_tabela, caminho_base, esquema=None,
             df = df.withColumn("partition_year", year(col("ingestion_timestamp"))) \
                    .withColumn("partition_month", month(col("ingestion_timestamp")))
 
+        if colunas_obrigatorias:
+            nulos = df.selectExpr(*[f"count_if(`{c}` IS NULL) AS `{c}`" for c in colunas_obrigatorias]).first().asDict()
+            nulos = {c: n for c, n in nulos.items() if n}
+            if nulos:
+                raise ValueError(f"colunas obrigatórias com nulo em {nome_tabela}: {nulos} - nada foi gravado")
+
         data_execucao = _carimbo_da_execucao(execucao).strftime("%Y%m%d")
-        combinacoes_particao = df.select("partition_year", "partition_month").distinct().collect()
+        # Um arquivo por partição por dia de execução (data completa YYYYMMDD
+        # no nome), em caminho_base/{nome_tabela}/. Se já existe, pula.
+        # Cache + 1 groupBy + 1 ls + escritas em paralelo: antes eram, por
+        # partição, filter + ls + write + count em série (68 partições em sets).
+        df = df.cache()
+        contagens = {(r["partition_year"], r["partition_month"]): r["count"]
+                     for r in df.groupBy("partition_year", "partition_month").count().collect()}
+        try:
+            existentes = {f.name.rstrip("/") for f in dbutils.fs.ls(f"{caminho_base}/{nome_tabela}")}
+        except Exception:
+            existentes = set()
 
-        for linha_particao in combinacoes_particao:
-            ano_particao = linha_particao["partition_year"]
-            mes_particao = linha_particao["partition_month"]
-
-            df_particao = df.filter(
-                (col("partition_year") == ano_particao) & (col("partition_month") == mes_particao)
-            )
-
-            # Um arquivo por partição por dia de execução (data completa YYYYMMDD
-            # no nome), em caminho_base/{nome_tabela}/. Se já existe, pula.
+        pendentes = []
+        for (ano_particao, mes_particao), qtd in contagens.items():
             nome_arquivo = nome_arquivo_parquet(ano_particao, mes_particao, data_execucao, nome_tabela)
-            caminho_arquivo = f"{caminho_base}/{nome_tabela}/{nome_arquivo}"
+            if nome_arquivo in existentes:
+                print(f"Arquivo {nome_arquivo} já existe - pulando (já ingerido hoje)")
+                if execucao is not None:
+                    execucao["files_skipped"] = execucao.get("files_skipped", 0) + 1
+            else:
+                pendentes.append((ano_particao, mes_particao, nome_arquivo, qtd))
 
-            try:
-                arquivos_existentes = dbutils.fs.ls(caminho_arquivo)
-                if len(arquivos_existentes) > 0:
-                    print(f"Arquivo {nome_arquivo} já existe - pulando (já ingerido hoje)")
-                    if execucao is not None:
-                        execucao["files_skipped"] = execucao.get("files_skipped", 0) + 1
-                    continue
-            except Exception:
-                pass
+        def gravar(pendente):
+            ano_particao, mes_particao, nome_arquivo, _ = pendente
+            df.filter((col("partition_year") == ano_particao) & (col("partition_month") == mes_particao))               .drop("partition_year", "partition_month")               .write.mode("overwrite").format("parquet").save(f"{caminho_base}/{nome_tabela}/{nome_arquivo}")
+            return pendente
 
-            df_particao.drop("partition_year", "partition_month") \
-                .write.mode("overwrite").format("parquet").save(caminho_arquivo)
-            print(f"Arquivo {nome_arquivo} criado com sucesso")
-            if execucao is not None:
-                execucao["files_written"] = execucao.get("files_written", 0) + 1
-                execucao["records_written"] = execucao.get("records_written", 0) + df_particao.count()
+        # ponytail: 8 escritas simultâneas no driver single-node; subir se o cluster crescer.
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for _, _, nome_arquivo, qtd in pool.map(gravar, pendentes):
+                print(f"Arquivo {nome_arquivo} criado com sucesso")
+                if execucao is not None:
+                    execucao["files_written"] = execucao.get("files_written", 0) + 1
+                    execucao["records_written"] = execucao.get("records_written", 0) + qtd
 
         print(f"Registros salvos como Parquet para {nome_tabela}")
         return df

@@ -189,16 +189,27 @@ def test_verificacao_pega_job_que_ficou_na_branch():
     assert divergencias == ["git_ref: 'main' -> 'v1.0.0'"]
 
 
-def test_verificacao_pega_orquestrador_apontando_pra_job_id_velho():
-    # os placeholders {{MTG_*_JOB_ID}} sao substituidos pelo deploy.py; a API
-    # aceita um id velho sem erro.
+def test_orquestrador_embute_as_camadas_num_cluster_so():
+    # MTG_PIPELINE sobe com as tasks das 4 camadas e um job_cluster so; cada
+    # camada espera a anterior inteira, e so a Stage herda o retry.
     deploy = _deploy_com_ambiente({})
-    enviado = {"name": "MTG_PIPELINE", "tasks": [{"run_job_task": {"job_id": 999}}]}
-    lido = {"name": "MTG_PIPELINE", "tasks": [{"run_job_task": {"job_id": 111}}]}
+    raiz = os.path.join(os.path.dirname(__file__), "..", "..")
+    atual = os.getcwd()
+    os.chdir(raiz)
+    try:
+        job = deploy.carregar_config_job(".github/DAGs/pipeline.yml", "MTG_PIPELINE")
+    finally:
+        os.chdir(atual)
 
-    assert deploy.diferencas(
-        deploy.campos_criticos(lido), deploy.campos_criticos(enviado)
-    ) == ["run_job_task_ids: ['111'] -> ['999']"]
+    tarefas = {t["task_key"]: t for t in job["tasks"]}
+    assert not any("run_job_task" in t for t in job["tasks"])
+    assert len(job["job_clusters"]) == 1
+    assert {t["job_cluster_key"] for t in job["tasks"]} == {job["job_clusters"][0]["job_cluster_key"]}
+    assert tarefas["stage_precos"]["max_retries"] == 2 and "depends_on" not in tarefas["stage_precos"]
+    assert "max_retries" not in tarefas["bronze_precos"]
+    assert {d["task_key"] for d in tarefas["gold_mercado_cartas"]["depends_on"]} == {
+        k for k in tarefas if k.startswith("silver_")}
+    assert job["git_source"]["git_branch"] == "main"
 
 
 def test_deploy_identico_nao_acusa_nada():
@@ -231,7 +242,6 @@ def test_job_sem_git_e_sem_cluster_nao_quebra_a_verificacao():
 
     assert campos["git_ref"] is None
     assert campos["config_do_ambiente"] == {}
-    assert campos["run_job_task_ids"] == []
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -246,7 +256,7 @@ if __name__ == "__main__":
     test_verificacao_pega_alerta_que_sumiu()
     test_verificacao_pega_catalogo_que_nao_chegou_no_cluster()
     test_verificacao_pega_job_que_ficou_na_branch()
-    test_verificacao_pega_orquestrador_apontando_pra_job_id_velho()
+    test_orquestrador_embute_as_camadas_num_cluster_so()
     test_deploy_identico_nao_acusa_nada()
     test_campos_criticos_ignora_variavel_ambiente_que_nao_e_nossa()
     test_job_sem_git_e_sem_cluster_nao_quebra_a_verificacao()

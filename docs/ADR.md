@@ -22,6 +22,8 @@ isso está dito em cada uma.
 | [009](#adr-009--workflow-de-prd-versionado-no-repo-de-dev) | Workflow de prd versionado no repo de dev | Aceita |
 | [010](#adr-010--validação-em-camadas-ci-estático--smoke-test) | Validação em camadas: CI estático + smoke test | Aceita |
 | [011](#adr-011--publicação-com-código-novo-roda-o-pipeline-de-prd) | Publicação com código novo roda o pipeline de prd | Aceita |
+| [012](#adr-012--símbolos-de-mana-fora-do-pipeline) | Símbolos de mana fora do pipeline | Aceita |
+| [013](#adr-013--gold-incremental-com-propagação-da-dimensão) | Gold incremental com propagação da dimensão | Aceita |
 
 ---
 
@@ -43,7 +45,9 @@ torna impossível reprocessar uma etapa sem refazer as outras.
   (`TB_FATO_MERCADO_CARTAS`).
 
 Cada camada é um job (`MTG_STAGE`, `MTG_BRONZE`, `MTG_SILVER`, `MTG_GOLD`) e o
-`MTG_PIPELINE` orquestra a ordem via `run_job_task`.
+`MTG_PIPELINE` orquestra a ordem. No YAML ele lista as camadas como
+`run_job_task`; o deploy embute as tasks de cada camada num job só, com um
+cluster só (antes cada camada subia o próprio, ~115s de setup cada).
 
 **Consequências.** Qualquer camada reprocessa sozinha a partir da anterior. O
 custo é armazenar o dado em cada camada (Parquet na Stage + Delta em Bronze/Silver/Gold), irrelevante no volume atual.
@@ -77,9 +81,18 @@ por curiosidade — sem duplicar dado.
 - **Bronze** grava em `append` com `mergeSchema` e só lê arquivos da Stage cujo
   `source_file` ainda não está na tabela. Nada é deduplicado nem sobrescrito:
   a Bronze é o histórico bruto.
-- **Silver** e **Gold** deduplicam a origem pela chave de negócio (`row_number`
-  na Silver quando há coluna de ordenação, senão `dropDuplicates`; na Gold, chave duplicada no lote aborta a run) e gravam com merge do Delta (`DeltaTable.merge`) por essa
-  chave. Na primeira carga, sem tabela ainda, é `overwrite`.
+- **Silver** deduplica a origem pela chave de negócio (`row_number` quando há
+  coluna de ordenação, senão `dropDuplicates`) e grava com merge do Delta
+  (`DeltaTable.merge`) por essa chave. Na primeira carga, sem tabela ainda, é
+  `overwrite`.
+- **Gold**: dimensão com `overwrite`, fato com MERGE incremental que propaga
+  mudança da dimensão ao histórico; chave duplicada no lote aborta a run
+  ([ADR-013](#adr-013--gold-incremental-com-propagação-da-dimensão)).
+- Toda camada valida o schema antes de gravar: a Stage aborta se coluna
+  obrigatória vier nula (`colunas_obrigatorias` no `salvar_em_parquet`); Bronze,
+  Silver e Gold comparam o lote com a tabela e com o `*_column_docs`
+  (`validar_contrato_esquema`). Coluna nova passa; coluna removida ou tipo
+  alterado só com `permitir_quebra_esquema=True`.
 
 **Consequências.** Toda camada é idempotente, o que viabiliza a [ADR-011](#adr-011--publicação-com-código-novo-roda-o-pipeline-de-prd)
 (rodar a cada publicação). A Bronze só cresce; se o volume algum dia pesar, a
@@ -91,9 +104,9 @@ saída é retenção/`VACUUM`, não mudar o modo de escrita.
 `job_id`, que só existe depois do deploy.
 
 **Decisão.** Cada job é um YAML em `.github/DAGs/`. O `.github/scripts/deploy.py`
-faz o deploy na ordem Stage → Bronze → Silver → Gold → Pipeline, troca os
-placeholders `{{MTG_*_JOB_ID}}` pelos IDs reais e usa `jobs reset` (settings
-inteiras, sem drift de alteração manual pela UI).
+faz o deploy na ordem Stage → Bronze → Silver → Gold → Pipeline, troca cada
+placeholder `{{MTG_*_JOB_ID}}` do pipeline pelas tasks da camada e usa
+`jobs reset` (settings inteiras, sem drift de alteração manual pela UI).
 
 **Alternativa descartada.** Databricks Asset Bundles resolvem as referências
 nativamente e seriam o caminho numa empresa (um bundle por projeto, deploy só
@@ -109,7 +122,7 @@ projetos crescer.
 outro workspace duplicaria custo e administração sem ganho real de isolamento
 para uma pessoa só.
 
-**Decisão.** Os dois ambientes usam o mesmo código, o mesmo instance pool e o
+**Decisão.** Os dois ambientes usam o mesmo código, a mesma configuração de cluster e o
 mesmo secret scope (`mtg-pipeline`). O que difere viaja como env var `MTG_*`
 no workflow e o `deploy.py` injeta no job:
 
@@ -230,3 +243,48 @@ de documentação só redeploya. Rollback manual roda só com o input `rodar` ma
 mais é seguro pela [ADR-003](#adr-003--bronze-append-only-silver-e-gold-com-merge).
 Falha da carga avisa pelo e-mail de alerta do job, não pelo GitHub — o workflow
 termina antes da carga.
+
+## ADR-012 — Símbolos de mana fora do pipeline
+
+**Contexto.** `symbology` (Stage/Bronze), `TB_DOM_SIMBOLOS` e
+`TB_PONTE_CARTA_SIMBOLOS` (Silver) não tinham consumidor: a Gold não usa (grão
+carta x símbolo não cabe em carta x cotação) e, em 90 dias, a linhagem do Unity
+Catalog só mostrou leitura pelos próprios jobs Silver — nenhum SELECT de SQL,
+Genie ou dashboard. Cor e custo de mana por carta já chegam na Gold por
+`COD_CORES`, `NME_CATEGORIA_COR` e `QTD_CUSTO_MANA`.
+
+**Decisão.** Sai do pipeline: endpoint `/symbology`, Bronze `symbology`, Silver
+`TB_DOM_SIMBOLOS` e `TB_PONTE_CARTA_SIMBOLOS` (notebooks, DAGs, column_docs,
+testes e docs). As tabelas e os arquivos no S3 são apagados à mão, fora do deploy.
+
+**Consequências.** Menos 4 tasks e 3 tabelas pra manter. Análise por símbolo de
+mana volta com revert deste commit quando tiver consumidor — de preferência já
+agregada por carta, sem mudar o grão da Gold.
+
+## ADR-013 — Gold incremental com propagação da dimensão
+
+**Contexto.** `TB_FATO_MERCADO_CARTAS` (cotação x atributos da carta) era
+recalculada inteira e gravada com MERGE a cada run. O MERGE nunca apagava: o
+que saía da Silver ficava na Gold (a Gold chegou a ter 3 snapshots com a
+Silver em 2). Incremental puro não serve: migração de id e ruling novo
+precisam valer para cotações antigas. View resolveria o custo, mas a Gold
+precisa ser tabela física para consumo (BI/Genie).
+
+**Decisão.**
+- `gold.TB_DIM_CARTAS`: 1 linha por `ID_CARTA` com os atributos atuais
+  (catálogo, coleção, rulings, migração), PK `ID_CARTA`.
+- `gold.TB_FATO_MERCADO_CARTAS`: `silver.TB_FATO_PRECOS_CARTAS` INNER JOIN
+  `TB_DIM_CARTAS`, PK `(ID_CARTA, DT_COTACAO)`.
+- A dimensão é recalculada e gravada com `overwrite` (tamanho do catálogo,
+  não cresce com o histórico).
+- A fato recebe MERGE só com: cotações com `DT_INGESTAO` maior que a última
+  `DT_COTACAO` da Gold, mais todo o histórico das cartas que mudaram na
+  dimensão (`EXCEPT` da dimensão nova contra a versão anterior, via time
+  travel).
+- Carga completa (`overwrite`) quando a fato ou a dimensão não existem, a
+  dimensão mudou de colunas, ou com o widget `rebuild=true`.
+
+**Consequências.** O custo da run segue o volume novo, não o histórico, e
+migração/ruling novo continuam valendo para cotações antigas. O incremental
+não apaga: cotação removida da Silver (ou snapshot com data anterior à última
+da Gold) só entra/sai com `rebuild=true`.

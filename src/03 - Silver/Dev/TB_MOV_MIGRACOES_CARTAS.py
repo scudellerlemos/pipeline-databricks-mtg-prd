@@ -119,7 +119,6 @@ def transformar_migracoes_silver(df):
 
     df_final = normalizar_valores(df_final, ["NME_CARTA_ASSOCIADA", "NME_FONTE"])
 
-    logger.info(f"Transformacao Migracoes de Id de Cartas concluida: {df_final.count()} registros")
     return df_final
 
 def anexar_id_canonico(df_migracoes):

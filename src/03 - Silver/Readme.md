@@ -55,7 +55,7 @@ Antes do merge há dedup por chave: `row_number()` (ordem por `coluna_ordenacao`
 
 ## Estrutura dos Notebooks
 
-São 7 notebooks, orquestrados por `.github/DAGs/silver.yml` (detalhe de cada tabela em [`Documentação/Readme.md`](./Documentação/Readme.md)):
+São 5 notebooks, orquestrados por `.github/DAGs/silver.yml` (detalhe de cada tabela em [`Documentação/Readme.md`](./Documentação/Readme.md)):
 
 | Notebook | Chave | `coluna_ordenacao` (dedup) | Partição |
 |---|---|---|---|
@@ -63,11 +63,9 @@ São 7 notebooks, orquestrados por `.github/DAGs/silver.yml` (detalhe de cada ta
 | `TB_DIM_COLECOES.py` | `COD_COLECAO` | `DT_INGESTAO` | `ANO_LANCAMENTO`/`MES_LANCAMENTO` |
 | `TB_FATO_PRECOS_CARTAS.py` | `ID_CARTA` + `DT_INGESTAO` | — (dropDuplicates) | `ANO_INGESTAO`/`MES_INGESTAO` |
 | `TB_MOV_MIGRACOES_CARTAS.py` | `ID_MIGRACAO` | `DT_INGESTAO` | `ANO_EXECUCAO`/`MES_EXECUCAO` |
-| `TB_DOM_SIMBOLOS.py` | `COD_SIMBOLO` | `DT_INGESTAO` | sem partição |
 | `TB_FATO_ESCLARECIMENTOS_CARTAS.py` | `ID_ESCLARECIMENTO` | `DT_INGESTAO` | `ANO_PUBLICACAO`/`MES_PUBLICACAO` |
-| `TB_PONTE_CARTA_SIMBOLOS.py` | `ID_CARTA` + `NUM_ORDEM_SIMBOLO` | — (dropDuplicates) | sem partição |
 
-`TB_PONTE_CARTA_SIMBOLOS` depende de `TB_FATO_CARTAS` e `TB_DOM_SIMBOLOS` no DAG; as demais rodam independentes.
+Os notebooks rodam independentes.
 
 ## Configurações Necessárias
 
@@ -88,9 +86,7 @@ Com `MTG_ENVIRONMENT=production`, resolver o catálogo para `mtg_dev` é bloquea
     ├── TB_DIM_COLECOES
     ├── TB_FATO_PRECOS_CARTAS
     ├── TB_MOV_MIGRACOES_CARTAS
-    ├── TB_DOM_SIMBOLOS
-    ├── TB_FATO_ESCLARECIMENTOS_CARTAS
-    └── TB_PONTE_CARTA_SIMBOLOS
+    └── TB_FATO_ESCLARECIMENTOS_CARTAS
 ```
 
 ## Fluxo de Execução
@@ -165,7 +161,7 @@ tabela_delta.alias("silver").merge(df_final.alias("novo"), "silver.ID_CARTA <=> 
 ```
 
 ### Compatibilidade e Enriquecimento de Schema
-- Diferença de schema é só logada; coluna nova entra via `withSchemaEvolution()` no merge
+- Contrato de schema antes de gravar (`validar_contrato_esquema` em base_utils): as colunas do lote têm que ser exatamente as do `silver_column_docs`; coluna removida ou tipo alterado em relação à tabela aborta, a não ser com `permitir_quebra_esquema=True`. Coluna nova entra via `withSchemaEvolution()` no merge (o mesmo vale na Gold)
 - Renomeação e padronização de colunas
 - Enriquecimento com colunas derivadas (ex: categorias, flags, métricas)
 - Preservação de dados existentes
@@ -178,7 +174,7 @@ tabela_delta.alias("silver").merge(df_final.alias("novo"), "silver.ID_CARTA <=> 
 
 ### Particionamento das Tabelas
 - **Dados Temporais**: Particionamento por ano/mês de referência
-- **Dados de Referência**: `TB_DIM_COLECOES` por ano/mês de lançamento; `TB_DOM_SIMBOLOS` sem partição
+- **Dados de Referência**: `TB_DIM_COLECOES` por ano/mês de lançamento
 - **Dados de Preços**: Particionamento por ano/mês de ingestão
 
 ## Próximos Passos

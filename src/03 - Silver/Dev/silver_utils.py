@@ -26,7 +26,7 @@ processador.salvar_tabela_silver(df_silver, colunas_particao=["ANO_INGESTAO", "M
 
 import unicodedata
 
-from pyspark.sql.functions import col, hash, row_number, trim, initcap, regexp_replace, udf, when
+from pyspark.sql.functions import col, hash, lit, row_number, trim, initcap, regexp_replace, udf, when
 from pyspark.sql.types import StringType
 from pyspark.sql.window import Window
 from delta.tables import DeltaTable
@@ -41,7 +41,7 @@ from delta.tables import DeltaTable
 # %run'd, então buscamos no namespace do IPython. Fora do Databricks (pytest
 # local) get_ipython() é None e o bloco é ignorado.
 try:
-    obter_sessao_spark, obter_segredo, configurar_unity_catalog
+    obter_sessao_spark, obter_segredo, configurar_unity_catalog, validar_contrato_esquema, campos_do_esquema, aplicar_documentacao_tabela
 except NameError:
     try:
         import IPython
@@ -49,6 +49,9 @@ except NameError:
         obter_sessao_spark = _namespace_usuario["obter_sessao_spark"]
         obter_segredo = _namespace_usuario["obter_segredo"]
         configurar_unity_catalog = _namespace_usuario["configurar_unity_catalog"]
+        validar_contrato_esquema = _namespace_usuario["validar_contrato_esquema"]
+        campos_do_esquema = _namespace_usuario["campos_do_esquema"]
+        aplicar_documentacao_tabela = _namespace_usuario["aplicar_documentacao_tabela"]
     except Exception:
         pass
 # ============================================================================
@@ -102,46 +105,30 @@ def normalizar_valores(df, colunas):
 # ============================================================================
 # FUNÇÕES DE EXTRAÇÃO DA BRONZE
 # ============================================================================
-def extrair_da_bronze(catalogo, nome_tabela_bronze):
-    """EXTRACT: lê dados da camada Bronze"""
+def extrair_da_bronze(catalogo, nome_tabela_bronze, tabela_silver=None):
+    """EXTRACT: lê dados da camada Bronze.
+
+    Com tabela_silver já existente, lê só o que a Bronze recebeu depois da última
+    carga dela (bronze_ingestion_timestamp > max(DT_INGESTAO_BRONZE)). A Bronze é
+    append e guarda todos os snapshots; o que é antigo já foi mergeado. Sem a
+    tabela (primeira carga ou rebuild), lê a Bronze inteira.
+    """
     sessao_spark = obter_sessao_spark()
     tabela_bronze = f"{catalogo}.bronze.{nome_tabela_bronze}"
     # Sem try/except de propósito: erro de leitura (ex.: TABLE_OR_VIEW_NOT_FOUND)
     # deve derrubar a task Silver com a mensagem original.
     df = sessao_spark.table(tabela_bronze)
+    if tabela_silver and sessao_spark.catalog.tableExists(tabela_silver):
+        corte = sessao_spark.table(tabela_silver).agg({"DT_INGESTAO_BRONZE": "max"}).first()[0]
+        if corte is not None:
+            df = df.filter(col("bronze_ingestion_timestamp") > lit(corte))
+            print(f"Incremental: Bronze depois de {corte} (última carga de {tabela_silver})")
     print(f"Extraídos {df.count()} registros da Bronze: {tabela_bronze}")
     return df
 
 # ============================================================================
-# DOCUMENTAÇÃO NO UNITY CATALOG (mesmo padrão de bronze_utils.py)
-#
-# Duplicada de propósito: função de um arquivo %run'd não é visível dentro de
-# outro arquivo %run'd (ver nota no topo), então não dá pra mover pra base_utils.
+# DOCUMENTAÇÃO NO UNITY CATALOG (aplicar_documentacao_tabela vem da base_utils)
 # ============================================================================
-def _escapar_string_sql(valor):
-    # Spark SQL não aceita '' como aspas literal; o escape é com backslash.
-    return valor.replace("\\", "\\\\").replace("'", "\\'")
-
-
-def aplicar_documentacao_tabela(spark, nome_completo_tabela, comentario_tabela=None, comentarios_colunas=None):
-    """Aplica COMMENT ON TABLE / ALTER COLUMN...COMMENT no Unity Catalog.
-
-    Só metadado (não reescreve dado), então roda em toda execução. Colunas em
-    comentarios_colunas que não existem na tabela são ignoradas.
-    """
-    if comentario_tabela:
-        spark.sql(f"COMMENT ON TABLE {nome_completo_tabela} IS '{_escapar_string_sql(comentario_tabela)}'")
-
-    if comentarios_colunas:
-        colunas_existentes = {f.name for f in spark.table(nome_completo_tabela).schema.fields}
-        for nome_coluna, comentario in comentarios_colunas.items():
-            if nome_coluna in colunas_existentes:
-                spark.sql(
-                    f"ALTER TABLE {nome_completo_tabela} "
-                    f"ALTER COLUMN `{nome_coluna}` COMMENT '{_escapar_string_sql(comentario)}'"
-                )
-
-
 def _declarar_chave_primaria(sessao_spark, nome_completo_tabela, nome_tabela, colunas_chave):
     """Declara a PRIMARY KEY de colunas_chave em nome_completo_tabela no Unity Catalog.
 
@@ -191,7 +178,7 @@ def _declarar_chave_primaria(sessao_spark, nome_completo_tabela, nome_tabela, co
 # ============================================================================
 def salvar_na_silver(df_final, catalogo, esquema, nome_tabela, caminho_s3_silver,
                      colunas_particao=None, coluna_chave=None, coluna_ordenacao=None,
-                     comentario_tabela=None, comentarios_colunas=None):
+                     comentario_tabela=None, comentarios_colunas=None, permitir_quebra_esquema=False):
     """
     LOAD: grava df_final na camada Silver (Delta + Unity Catalog).
 
@@ -213,7 +200,10 @@ def salvar_na_silver(df_final, catalogo, esquema, nome_tabela, caminho_s3_silver
         comentario_tabela (str, optional): descrição de negócio da tabela (ver
             silver_column_docs.py). Recebe a nota de chave única ao final.
         comentarios_colunas (dict, optional): {nome_coluna: descrição de negócio}
-            (ver silver_column_docs.py).
+            (ver silver_column_docs.py). As chaves são o contrato de nomes: o lote tem
+            que ter exatamente essas colunas.
+        permitir_quebra_esquema (bool): True só para remover coluna ou mudar
+            tipo de propósito. Sem isso, o contrato aborta antes de gravar.
     """
     if not caminho_s3_silver.startswith("s3://"):
         caminho_s3_silver = f"s3://{caminho_s3_silver}"
@@ -245,6 +235,14 @@ def salvar_na_silver(df_final, catalogo, esquema, nome_tabela, caminho_s3_silver
 
     arquivos_existem = DeltaTable.isDeltaTable(sessao_spark, caminho_delta)
 
+    # Contrato de schema antes de qualquer escrita (ver base_utils).
+    campos_atuais = campos_do_esquema(DeltaTable.forPath(sessao_spark, caminho_delta).toDF().schema) if arquivos_existem else {}
+    validar_contrato_esquema(
+        nome_completo_tabela, campos_atuais, campos_do_esquema(df_final.schema),
+        colunas_documentadas=list(comentarios_colunas) if comentarios_colunas else None,
+        permitir_quebra=permitir_quebra_esquema,
+    )
+
     if not arquivos_existem:
         print(f"Delta ainda não existe em {caminho_delta}. Criando (primeira carga).")
         escritor = df_final.write.format("delta").mode("overwrite")
@@ -255,14 +253,6 @@ def salvar_na_silver(df_final, catalogo, esquema, nome_tabela, caminho_s3_silver
 
     elif coluna_chave:
         colunas_chave = [coluna_chave] if isinstance(coluna_chave, str) else list(coluna_chave)
-
-        # Só loga diferença de schema (metadado, sem scan). Coluna nova entra via
-        # withSchemaEvolution(); remoção ou mudança de tipo pode falhar o MERGE.
-        colunas_atuais = set(f.name for f in DeltaTable.forPath(sessao_spark, caminho_delta).toDF().schema.fields)
-        colunas_novas = set(df_final.columns)
-        if colunas_atuais != colunas_novas:
-            print(f"Schema de {nome_completo_tabela} mudou: colunas removidas={sorted(colunas_atuais - colunas_novas)}, "
-                  f"colunas novas={sorted(colunas_novas - colunas_atuais)}.")
 
         # <=> (null-safe): com =, chave nula nunca dá match e seria reinserida a cada run.
         condicao_merge = " AND ".join(f"silver.{k} <=> novo.{k}" for k in colunas_chave)
@@ -319,16 +309,20 @@ class SilverTableProcessor:
 
     def extrair_da_bronze(self, nome_tabela_bronze):
         """Extrai dados da Bronze"""
-        return extrair_da_bronze(self.config['catalog_name'], nome_tabela_bronze)
+        tabela_silver = f"{self.config['catalog_name']}.{self.config['schema_silver']}.{self.nome_tabela}"
+        return extrair_da_bronze(self.config['catalog_name'], nome_tabela_bronze, tabela_silver)
 
     def transformar_dados(self, df, funcao_transformacao, **kwargs):
         """Aplica função de transformação personalizada (lógica em SQL, no notebook)"""
+        # cache: o MERGE e o count() do fim do notebook reusam o resultado em
+        # vez de refazer a transformação desde a Bronze.
         if funcao_transformacao:
-            return funcao_transformacao(df, **kwargs)
-        return df
+            return funcao_transformacao(df, **kwargs).cache()
+        return df.cache()
 
     def salvar_tabela_silver(self, df, colunas_particao=None, coluna_chave=None, coluna_ordenacao=None,
-                             comentario_tabela=None, comentarios_colunas=None):
+                             comentario_tabela=None, comentarios_colunas=None,
+                             permitir_quebra_esquema=False):
         """Salva tabela na Silver com configurações padrão"""
         salvar_na_silver(
             df_final=df,
@@ -340,7 +334,8 @@ class SilverTableProcessor:
             coluna_chave=coluna_chave,
             coluna_ordenacao=coluna_ordenacao,
             comentario_tabela=comentario_tabela,
-            comentarios_colunas=comentarios_colunas
+            comentarios_colunas=comentarios_colunas,
+            permitir_quebra_esquema=permitir_quebra_esquema
         )
 
         print(f"{self.nome_tabela} criada com sucesso!")

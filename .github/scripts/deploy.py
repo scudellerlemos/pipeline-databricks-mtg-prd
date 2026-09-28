@@ -2,10 +2,10 @@
 """
 Deploy dos jobs do pipeline no Databricks.
 
-Sem Asset Bundles, nao ha interpolacao de job_id entre jobs. O orquestrador
-(MTG_PIPELINE) chama os 4 jobs de camada via run_job_task.job_id, entao eles
-sao deployados primeiro e seus job_ids substituem os placeholders
-"{{MTG_STAGE_JOB_ID}}" etc. do pipeline.yml.
+O orquestrador (MTG_PIPELINE) declara as camadas como run_job_task com
+placeholder "{{MTG_STAGE_JOB_ID}}" etc. O deploy troca cada uma pelas tasks do
+YAML da camada, todas num cluster so (ver embutir_camadas). Os jobs de camada
+seguem deployados para rodar uma camada avulsa.
 """
 
 import yaml
@@ -15,7 +15,7 @@ import sys
 import os
 from datetime import datetime
 
-# (arquivo, chave_job). O orquestrador vai por ultimo: precisa dos job_ids dos outros.
+# (arquivo, chave_job).
 ORDEM_DEPLOY = [
     (".github/DAGs/stage.yml", "MTG_STAGE"),
     (".github/DAGs/bronze.yml", "MTG_BRONZE"),
@@ -113,9 +113,7 @@ def log(mensagem, nivel="INFO"):
     print(f"[{agora}] [{nivel}] {mensagem}")
 
 
-def carregar_config_job(caminho_yaml, chave_job, ids_job_por_chave=None):
-    """Le o YAML, extrai o job e (se for o orquestrador) substitui os
-    placeholders de job_id pelos IDs reais ja deployados."""
+def carregar_yaml_job(caminho_yaml, chave_job):
     with open(caminho_yaml, "r", encoding="utf-8") as f:
         dados_yaml = yaml.safe_load(f)
 
@@ -124,18 +122,47 @@ def carregar_config_job(caminho_yaml, chave_job, ids_job_por_chave=None):
     if chave_job not in dados_yaml["resources"]["jobs"]:
         raise ValueError(f"{caminho_yaml}: job {chave_job} não encontrado")
 
-    config_job = dados_yaml["resources"]["jobs"][chave_job]
+    return dados_yaml["resources"]["jobs"][chave_job]
 
-    if ids_job_por_chave:
-        for tarefa in config_job.get("tasks", []):
-            if "run_job_task" not in tarefa:
-                continue
-            marcador = tarefa["run_job_task"].get("job_id", "")
-            for chave_referenciada, id_referenciado in ids_job_por_chave.items():
-                marcador_esperado = "{{" + f"{chave_referenciada}_JOB_ID" + "}}"
-                if marcador == marcador_esperado:
-                    tarefa["run_job_task"]["job_id"] = id_referenciado
 
+def embutir_camadas(config_job):
+    """Troca cada run_job_task "{{MTG_X_JOB_ID}}" pelas tasks do job X.
+
+    Com run_job_task cada camada subia o proprio cluster (~115s de setup cada,
+    medido em 28/09); embutidas, o pipeline inteiro divide um. As tasks sem
+    depends_on dentro da camada passam a depender de todas as tasks da camada
+    anterior, e herdam os campos da task do orquestrador (ex.: retry da Stage).
+    """
+    arquivos = {chave: caminho for caminho, chave in ORDEM_DEPLOY}
+    tarefas, clusters, git, tarefas_por_camada = [], {}, None, {}
+    for orquestradora in config_job["tasks"]:
+        chave = orquestradora["run_job_task"]["job_id"].strip("{}").removesuffix("_JOB_ID")
+        camada = carregar_yaml_job(arquivos[chave], chave)
+        anteriores = [k for dep in orquestradora.get("depends_on", []) for k in tarefas_por_camada[dep["task_key"]]]
+        herdado = {k: v for k, v in orquestradora.items() if k not in ("task_key", "depends_on", "run_job_task")}
+        for tarefa in camada["tasks"]:
+            tarefa = {**tarefa, **herdado}
+            if "depends_on" not in tarefa and anteriores:
+                tarefa["depends_on"] = [{"task_key": k} for k in anteriores]
+            tarefas.append(tarefa)
+        tarefas_por_camada[orquestradora["task_key"]] = [t["task_key"] for t in camada["tasks"]]
+
+        for cluster in camada.get("job_clusters", []):
+            if clusters.setdefault(cluster["job_cluster_key"], cluster) != cluster:
+                raise ValueError(f"{chave}: job_cluster {cluster['job_cluster_key']} difere das outras camadas")
+        if git is not None and camada["git_source"] != git:
+            raise ValueError(f"{chave}: git_source difere das outras camadas")
+        git = camada["git_source"]
+
+    config_job.update(tasks=tarefas, job_clusters=list(clusters.values()), git_source=git)
+    return config_job
+
+
+def carregar_config_job(caminho_yaml, chave_job):
+    """Le o YAML, extrai o job, embute as camadas (orquestrador) e aplica o alvo."""
+    config_job = carregar_yaml_job(caminho_yaml, chave_job)
+    if any("run_job_task" in t for t in config_job.get("tasks", [])):
+        config_job = embutir_camadas(config_job)
     return aplicar_alvo(config_job)
 
 
@@ -191,11 +218,6 @@ def campos_criticos(configuracoes):
         "config_do_ambiente": {k: v for k, v in variaveis_ambiente.items() if k.startswith("MTG_")},
         # A API devolve email_notifications: {} quando nao mandamos nada; normaliza pra [].
         "alerta": (configuracoes.get("email_notifications") or {}).get("on_failure") or [],
-        "run_job_task_ids": sorted(
-            str(t["run_job_task"].get("job_id"))
-            for t in configuracoes.get("tasks", [])
-            if "run_job_task" in t
-        ),
     }
 
 
@@ -256,10 +278,10 @@ def validar_conexao_databricks():
         return False, False
 
 
-def deployar_job(caminho_yaml, chave_job, cli_nova, ids_job_por_chave):
+def deployar_job(caminho_yaml, chave_job, cli_nova):
     """Deploya (cria ou atualiza) um job e retorna seu job_id."""
     log(f"Lendo {caminho_yaml} ({chave_job} -> {nome_job(chave_job)})...")
-    config_job = carregar_config_job(caminho_yaml, chave_job, ids_job_por_chave)
+    config_job = carregar_config_job(caminho_yaml, chave_job)
     gravar_json(config_job)
 
     id_existente = obter_id_job_existente(config_job["name"], cli_nova)
@@ -321,12 +343,10 @@ def deployar_todos():
     if not conexao_ok:
         return False, cli_nova, {}
 
-    ids_job_por_chave = {}
     enviado_por_id = {}
     try:
         for caminho_yaml, chave_job in ORDEM_DEPLOY:
-            id_job, config_job = deployar_job(caminho_yaml, chave_job, cli_nova, ids_job_por_chave)
-            ids_job_por_chave[chave_job] = id_job
+            id_job, config_job = deployar_job(caminho_yaml, chave_job, cli_nova)
             enviado_por_id[id_job] = config_job
         return True, cli_nova, enviado_por_id
     except subprocess.CalledProcessError as e:

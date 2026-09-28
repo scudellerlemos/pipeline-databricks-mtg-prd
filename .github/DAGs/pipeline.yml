@@ -1,8 +1,9 @@
 resources:
   jobs:
-    # Orquestrador: roda Stage -> Bronze -> Silver -> Gold via run_job_task,
-    # cada camada so depois da anterior terminar.
-    # job_id e placeholder, substituido pelo ID real no deploy (ver deploy.py).
+    # Orquestrador: Stage -> Bronze -> Silver -> Gold, cada camada so depois da
+    # anterior terminar. Cada run_job_task e so um marcador: o deploy troca pelas
+    # tasks do YAML da camada, todas num cluster so (deploy.embutir_camadas).
+    # Com run_job_task de verdade cada camada subia o proprio cluster (~115s cada).
     MTG_PIPELINE:
       name: MTG_PIPELINE
       description: "Orquestrador: Stage -> Bronze -> Silver -> Gold"

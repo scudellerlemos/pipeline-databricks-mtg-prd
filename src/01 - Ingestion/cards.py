@@ -1,7 +1,7 @@
 # Databricks notebook source
 # Ingestão de Cards - Magic: The Gathering (Bulk Data)
 # Objetivo: Ingerir dados de cards via Scryfall Bulk Data API para staging em Parquet no S3
-# Características: Dados brutos, formato Parquet, filtro temporal, particionamento, incremental, por coleção (set)
+# Características: Dados brutos, formato Parquet, filtro temporal, particionamento, snapshot, por coleção (set)
 
 # =============================================================================
 # BIBLIOTECAS UTILIZADAS
@@ -168,7 +168,8 @@ def ingerir_cartas_por_colecao(codigos_colecoes, nome_tabela="cards", execucao=N
         print(f"Nenhum dado válido para {nome_tabela}")
         return None
 
-    df = salvar_em_parquet(spark, dados_tabela, nome_tabela, CAMINHO_S3_STAGE, esquema=ESQUEMA_CARTAS, execucao=execucao)
+    df = salvar_em_parquet(spark, dados_tabela, nome_tabela, CAMINHO_S3_STAGE, esquema=ESQUEMA_CARTAS, execucao=execucao,
+                           colunas_obrigatorias=["id", "oracle_id", "name", "set", "rarity", "type"])
 
     if df is not None:
         total = df.count()

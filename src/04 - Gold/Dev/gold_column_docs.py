@@ -11,6 +11,7 @@ Descrições voltadas para quem consome o dado (analista, BI, Genie).
 
 TABELAS_GOLD = {
     "TB_FATO_MERCADO_CARTAS": {
+        # Preços da Silver (TB_FATO_PRECOS_CARTAS) x TB_DIM_CARTAS.
         "comment": "Visão única de mercado de cartas de Magic: The Gathering - combina o catálogo de cartas, a coleção de origem, o histórico de cotação de preço e o volume de esclarecimentos oficiais de regras. Uma linha por cotação de preço de uma impressão de carta. Feita para responder 'quanto vale essa carta, em que coleção ela está e o quanto ela é discutida em termos de regras', sem precisar conhecer Bronze/Silver.",
         "columns": {
             "ID_CARTA": "Id único da impressão/edição desta carta.",
@@ -40,6 +41,19 @@ TABELAS_GOLD = {
             "MES_COTACAO": "Mês da coleta de preço - usado só para particionamento físico da tabela.",
         },
     },
+}
+
+# Atributos atuais da carta, recalculados inteiros a cada run. Mesmas
+# descrições da fato: quem consome vê o mesmo texto nos dois lugares.
+_COLUNAS_DIM_CARTAS = [
+    "ID_CARTA", "ID_ORACLE", "NME_CARTA", "NME_TIPO_CARTA", "NME_RARIDADE",
+    "NME_CATEGORIA_COR", "COD_CORES", "QTD_CUSTO_MANA", "COD_COLECAO",
+    "NME_COLECAO", "NME_BLOCO", "DT_LANCAMENTO_COLECAO", "QTD_ESCLARECIMENTOS",
+    "DT_ULTIMO_ESCLARECIMENTO", "ID_CARTA_CANONICO", "FLG_ID_CARTA_MIGRADO",
+]
+TABELAS_GOLD["TB_DIM_CARTAS"] = {
+    "comment": "Uma linha por impressão de carta de Magic: The Gathering com os atributos atuais: catálogo, coleção, esclarecimentos de regras e migração de id. Base de TB_FATO_MERCADO_CARTAS, que junta estes atributos a cada cotação de preço.",
+    "columns": {c: TABELAS_GOLD["TB_FATO_MERCADO_CARTAS"]["columns"][c] for c in _COLUNAS_DIM_CARTAS},
 }
 
 

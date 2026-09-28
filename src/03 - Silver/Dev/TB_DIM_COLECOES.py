@@ -102,7 +102,6 @@ def transformar_colecoes_silver(df):
         "NME_COR_BORDA", "NME_BLOCO", "NME_FONTE",
     ])
 
-    logger.info(f"Transformação Coleções concluída: {df_final.count()} registros")
     return df_final
 
 # =============================================================================

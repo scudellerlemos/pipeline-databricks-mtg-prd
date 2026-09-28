@@ -2,13 +2,16 @@
 """
 Validacao estrutural dos jobs Databricks definidos em .github/DAGs/*.yml.
 
-Cada arquivo tem um job em resources.jobs, deployado como job separado.
+Cada arquivo tem um job em resources.jobs, deployado como job separado. O
+orquestrador e validado ja com as camadas embutidas, como o deploy manda.
 """
 
 import json
 import os
 import sys
 import yaml
+
+from deploy import embutir_camadas
 
 ARQUIVOS_DAG = [
     (".github/DAGs/stage.yml", "MTG_STAGE"),
@@ -26,7 +29,10 @@ def carregar_job(caminho_yaml, chave_job):
         raise ValueError(f"{caminho_yaml}: resources.jobs nao encontrado")
     if chave_job not in config["resources"]["jobs"]:
         raise ValueError(f"{caminho_yaml}: job {chave_job} nao encontrado")
-    return config["resources"]["jobs"][chave_job]
+    job = config["resources"]["jobs"][chave_job]
+    if any("run_job_task" in t for t in job.get("tasks", [])):
+        job = embutir_camadas(job)
+    return job
 
 
 def validar_estrutura(caminho_yaml, chave_job, job):

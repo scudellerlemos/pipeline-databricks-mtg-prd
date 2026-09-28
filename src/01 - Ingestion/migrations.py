@@ -105,6 +105,8 @@ def ingerir_migracoes(execucao=None):
     df = salvar_em_parquet(
         spark, dados_tabela, "migrations", CAMINHO_S3_STAGE,
         esquema=ESQUEMA_MIGRACOES,
+        # new_scryfall_id fica de fora: vem nulo em migração "delete".
+        colunas_obrigatorias=["id", "performed_at", "migration_strategy", "old_scryfall_id"],
         execucao=execucao,
     )
 

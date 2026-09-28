@@ -44,23 +44,11 @@ Fornecer documentação de negócio e técnica de todas as tabelas Silver, permi
 - **Chave Única**: `ID_MIGRACAO`
 - **Particionamento**: `ANO_EXECUCAO`, `MES_EXECUCAO`
 
-### [TB_DOM_SIMBOLOS](TB_DOM_SIMBOLOS/Readme.md) - Símbolos de Mana
-- **Descrição**: Catálogo de referência de símbolos de mana/custo (cores, híbridos, phyrexianos)
-- **Classificação DAMA**: DOM/REF
-- **Chave Única**: `COD_SIMBOLO`
-- **Particionamento**: nenhum (tabela pequena e estática)
-
 ### [TB_FATO_ESCLARECIMENTOS_CARTAS](TB_FATO_ESCLARECIMENTOS_CARTAS/Readme.md) - Esclarecimentos de Regras
 - **Descrição**: Esclarecimentos oficiais de regras (rulings) publicados para cartas específicas
 - **Classificação DAMA**: Fato sem medida
 - **Chave Única**: `ID_ESCLARECIMENTO` (surrogate hash)
 - **Particionamento**: `ANO_PUBLICACAO`, `MES_PUBLICACAO`
-
-### [TB_PONTE_CARTA_SIMBOLOS](TB_PONTE_CARTA_SIMBOLOS/Readme.md) - Ponte Carta x Símbolos
-- **Descrição**: Explode o custo de mana de `TB_FATO_CARTAS` em 1 linha por símbolo (Silver -> Silver, resolve a relação N:N escondida em `DESC_CUSTO_MANA`)
-- **Classificação DAMA**: Ponte/associativa
-- **Chave Única**: `ID_CARTA` + `NUM_ORDEM_SIMBOLO`
-- **Particionamento**: nenhum (sem data de evento própria)
 
 ## Categorização das Tabelas
 
@@ -70,15 +58,13 @@ Fornecer documentação de negócio e técnica de todas as tabelas Silver, permi
 | TB_DIM_COLECOES | Dimensão | COD_COLECAO | ANO_LANCAMENTO/MES_LANCAMENTO |
 | TB_FATO_PRECOS_CARTAS | Fato | ID_CARTA + DT_INGESTAO | ANO_INGESTAO/MES_INGESTAO |
 | TB_MOV_MIGRACOES_CARTAS | MOV | ID_MIGRACAO | ANO_EXECUCAO/MES_EXECUCAO |
-| TB_DOM_SIMBOLOS | DOM/REF | COD_SIMBOLO | nenhum |
 | TB_FATO_ESCLARECIMENTOS_CARTAS | Fato sem medida | ID_ESCLARECIMENTO | ANO_PUBLICACAO/MES_PUBLICACAO |
-| TB_PONTE_CARTA_SIMBOLOS | Ponte/associativa | ID_CARTA + NUM_ORDEM_SIMBOLO | nenhum |
 
 ## Estatísticas da Camada Silver
 
 ### Volume de Dados
-- **7 tabelas** documentadas
-- Cada tabela mantém o grão da sua fonte Bronze original - preço e migração de id têm grão próprio, separado de cartas (ver `TB_FATO_CARTAS/Readme.md`, seção 2). Exceção: `TB_PONTE_CARTA_SIMBOLOS` não vem da Bronze, é derivada de `TB_FATO_CARTAS` (Silver -> Silver)
+- **5 tabelas** documentadas
+- Cada tabela mantém o grão da sua fonte Bronze original - preço e migração de id têm grão próprio, separado de cartas (ver `TB_FATO_CARTAS/Readme.md`, seção 2).
 
 ### Padrões de Nomenclatura
 Todas as colunas a partir da Silver são em PT-BR, sem acento, 100% MAIÚSCULAS (ex.: `ID_CARTA`, `NME_CARTA`). Prefixos semânticos:
@@ -109,7 +95,7 @@ Todo texto livre/estrutura serializada da fonte converte `{...}`/`(...)` para `[
 1. **Linhagem de Dados**: Entenda a origem e transformações
 2. **Particionamento**: Otimize consultas usando partições
 3. **Chaves Únicas**: Confira a seção 7 de cada README antes de fazer join/agregação
-4. **Relacionamentos**: `TB_FATO_CARTAS.COD_COLECAO` -> `TB_DIM_COLECOES`; `TB_FATO_PRECOS_CARTAS.ID_CARTA`/`TB_FATO_ESCLARECIMENTOS_CARTAS.ID_ORACLE` -> `TB_FATO_CARTAS`; `TB_MOV_MIGRACOES_CARTAS.ID_CARTA_CANONICO` para navegar id pós-migração; `TB_PONTE_CARTA_SIMBOLOS.ID_CARTA` -> `TB_FATO_CARTAS` e `TB_PONTE_CARTA_SIMBOLOS.COD_SIMBOLO` -> `TB_DOM_SIMBOLOS` para análise por símbolo/cor de mana
+4. **Relacionamentos**: `TB_FATO_CARTAS.COD_COLECAO` -> `TB_DIM_COLECOES`; `TB_FATO_PRECOS_CARTAS.ID_CARTA`/`TB_FATO_ESCLARECIMENTOS_CARTAS.ID_ORACLE` -> `TB_FATO_CARTAS`; `TB_MOV_MIGRACOES_CARTAS.ID_CARTA_CANONICO` para navegar id pós-migração
 
 ### Para Administradores
 1. **Configuração**: Verifique segredos e configurações necessárias

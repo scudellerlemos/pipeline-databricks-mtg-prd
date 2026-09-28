@@ -90,7 +90,6 @@ def transformar_precos_cartas_silver(df):
 
     df_final = normalizar_valores(df_final, ["NME_CARTA", "NME_RARIDADE", "NME_FONTE"])
 
-    logger.info(f"Transformacao Precos de Cartas concluida: {df_final.count()} registros")
     return df_final
 
 # =============================================================================

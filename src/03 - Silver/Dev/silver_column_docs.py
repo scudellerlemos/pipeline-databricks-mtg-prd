@@ -11,8 +11,7 @@ Descrições de negócio (o que a coluna significa), não de cálculo.
 Os READMEs de Documentação/ repetem este texto à mão: ao mudar aqui, mudar lá.
 """
 
-# Colunas de linhagem (Stage/Bronze), iguais em todas as tabelas Silver
-# exceto TB_PONTE_CARTA_SIMBOLOS.
+# Colunas de linhagem (Stage/Bronze), iguais em todas as tabelas Silver.
 COLUNAS_COMUNS = {
     "DT_INGESTAO": "Início da execução da Stage que gravou o registro (mesmo valor em todas as linhas da run).",
     "NME_FONTE": "Fonte de dados de origem ('Scryfall'; 'scryfall' minúsculo só em TB_FATO_CARTAS).",
@@ -122,33 +121,6 @@ TABELAS_SILVER = {
             "NUM_COLECIONADOR_ASSOCIADO": "Número de colecionador da carta associada a este registro de migração.",
             "ANO_EXECUCAO": "Ano de execução da migração - usado só para particionamento físico da tabela.",
             "MES_EXECUCAO": "Mês de execução da migração - usado só para particionamento físico da tabela.",
-        },
-    },
-    "TB_DOM_SIMBOLOS": {
-        "comment": "Lista de referência dos símbolos de mana e custo que aparecem no texto e no custo de mana das cartas (ex.: símbolo de mana branca, símbolo de taps). Use para traduzir/exibir corretamente esses símbolos e para saber quanto cada um vale em custo de mana. Lista de apoio, praticamente estática - raramente ganha símbolo novo.",
-        "columns": {
-            "COD_SIMBOLO": "Código do símbolo em colchete (ex.: [W]), a mesma notação de DESC_CUSTO_MANA em TB_FATO_CARTAS - junte por este código para traduzir um símbolo do custo de mana. Em DESC_CARTA os símbolos básicos viram nomes ([White], [Tap]) e não casam direto.",
-            "URL_ICONE": "Endereço da imagem deste símbolo.",
-            "DESC_VARIANTE_LIVRE": "Forma alternativa de escrever este símbolo em texto livre, normalizada (Title_Case, espaço vira '_'). 'NA' quando não existe.",
-            "DESC_SIMBOLO": "Descrição deste símbolo em inglês, normalizada (Title_Case, espaço vira '_'; ex.: 'One_White_Mana'). 'NA' se ausente.",
-            "FLG_TRANSPONIVEL": "Indica se este símbolo pode aparecer em ordem trocada dentro de um texto de regra.",
-            "FLG_REPRESENTA_MANA": "Indica se este símbolo representa mana (nem todo símbolo representa - alguns são custos não-mana, como o de virar a carta).",
-            "FLG_APARECE_CUSTO_MANA": "Indica se este símbolo pode aparecer no custo de mana de uma carta.",
-            "QTD_VALOR_MANA": "Quanto este símbolo contribui para o custo convertido de mana de uma carta.",
-            "FLG_HIBRIDO": "Indica se é um símbolo de mana híbrida (pode ser pago com qualquer uma de duas cores).",
-            "FLG_PHYREXIANO": "Indica se é um símbolo de mana phyrexiana (pode ser pago com mana de uma cor ou com pontos de vida).",
-            "QTD_CUSTO_CONVERTIDO": "Custo de mana convertido equivalente deste símbolo, quando difere de QTD_VALOR_MANA em casos especiais.",
-            "FLG_HUMORISTICO": "Indica se este símbolo só aparece em cartas não-oficiais/humorísticas.",
-            "COD_CORES": "Cor(es) de mana associada(s) a este símbolo.",
-            "DESC_GRAFIAS_GATHERER": "Formas alternativas deste símbolo usadas no Gatherer, separadas por ',_' e normalizadas em Title_Case (ex.: 'Ow,_Oow') - não reproduzem o case original; NULO se não houver.",
-        },
-    },
-    "TB_PONTE_CARTA_SIMBOLOS": {
-        "comment": "Tabela ponte entre carta e símbolo de mana - uma linha por símbolo que compõe o custo de mana de uma carta (ex.: carta com custo '2 mana genérica + 2 azul' vira 3 linhas). Resolve a relação N:N escondida dentro do texto de TB_FATO_CARTAS.DESC_CUSTO_MANA. Use para analisar cartas por símbolo/cor de mana (curva de mana, distribuição de cor) - junte COD_SIMBOLO com TB_DOM_SIMBOLOS para nome/cor/valor do símbolo.",
-        "columns": {
-            "ID_CARTA": "Impressão de carta a que este símbolo pertence - junte com TB_FATO_CARTAS.ID_CARTA.",
-            "NUM_ORDEM_SIMBOLO": "Posição deste símbolo dentro do custo de mana da carta (1 = primeiro símbolo à esquerda).",
-            "COD_SIMBOLO": "Símbolo de mana nesta posição do custo, na mesma notação de TB_DOM_SIMBOLOS.COD_SIMBOLO - junte lá para nome/cor/valor do símbolo.",
         },
     },
     "TB_FATO_ESCLARECIMENTOS_CARTAS": {

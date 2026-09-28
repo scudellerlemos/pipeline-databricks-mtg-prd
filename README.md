@@ -1,5 +1,9 @@
 # Pipeline de Dados - Magic: The Gathering
 
+> **Repositório de produção** (catálogo `mtg_prod`). Snapshot publicado
+> automaticamente de [`pipeline-databricks-mtg-dev`](https://github.com/scudellerlemos/pipeline-databricks-mtg-dev)
+> a cada merge na `main` de lá. Não edite aqui: mudanças entram por PR em dev.
+
 <div align="center">
 
 ![Magic: The Gathering](https://static.wikia.nocookie.net/finalfantasy/images/9/9e/FFAB_Thundara_-_Vivi_SR.png)
@@ -8,14 +12,14 @@
 
 </div>
 
-[![CI/CD Pipeline](https://github.com/scudellerlemos/pipeline-databricks-mtg-dev/actions/workflows/validate-pipeline.yml/badge.svg)](https://github.com/scudellerlemos/pipeline-databricks-mtg-dev/actions/workflows/validate-pipeline.yml)
+[![CI/CD Pipeline](https://github.com/scudellerlemos/pipeline-databricks-mtg-prd/actions/workflows/deploy-prd.yml/badge.svg)](https://github.com/scudellerlemos/pipeline-databricks-mtg-prd/actions/workflows/deploy-prd.yml)
 [![Databricks](https://img.shields.io/badge/Databricks-FF3621?style=flat&logo=databricks&logoColor=white)](https://databricks.com/)
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
 [![Apache Spark](https://img.shields.io/badge/Apache%20Spark-E25A1C?style=flat&logo=apachespark&logoColor=white)](https://spark.apache.org/)
 
 ## Visão Geral
 
-Pipeline de dados para análise de mercado de cartas Magic: The Gathering: coleta da API pública da Scryfall (endpoints bulk-data, /sets, /symbology e /migrations) e processamento em camadas no Databricks.
+Pipeline de dados para análise de mercado de cartas Magic: The Gathering: coleta da API pública da Scryfall (endpoints bulk-data, /sets e /migrations) e processamento em camadas no Databricks.
 
 ### Objetivos
 
@@ -55,7 +59,6 @@ pipeline-databricks-mtg-dev/
 │   │   ├── cards.py               # Cartas
 │   │   ├── sets.py                # Sets/Expansões
 │   │   ├── card_prices.py         # Preços das cartas
-│   │   ├── symbology.py           # Símbolos de mana/custo
 │   │   ├── rulings.py             # Esclarecimentos de regras
 │   │   ├── migrations.py          # Reconciliação de IDs Scryfall
 │   │   └── ingestion_utils.py     # HTTP retry, S3, controle de execução
@@ -65,7 +68,6 @@ pipeline-databricks-mtg-dev/
 │   │   │   ├── cards.py
 │   │   │   ├── sets.py
 │   │   │   ├── card_prices.py
-│   │   │   ├── symbology.py
 │   │   │   ├── rulings.py
 │   │   │   ├── migrations.py
 │   │   │   └── bronze_utils.py    # EL compartilhado (append + Unity Catalog)
@@ -78,8 +80,6 @@ pipeline-databricks-mtg-dev/
 │   │   │   ├── TB_FATO_PRECOS_CARTAS.py
 │   │   │   ├── TB_FATO_ESCLARECIMENTOS_CARTAS.py
 │   │   │   ├── TB_MOV_MIGRACOES_CARTAS.py
-│   │   │   ├── TB_DOM_SIMBOLOS.py
-│   │   │   ├── TB_PONTE_CARTA_SIMBOLOS.py
 │   │   │   └── silver_utils.py    # TL compartilhado (transform + Unity Catalog)
 │   │   └── Documentação/
 │   │
@@ -127,7 +127,7 @@ pipeline-databricks-mtg-dev/
 
 ### 2. Bronze Layer
 - **Função**: EL puro (Extract & Load) - lê o Parquet da Stage e grava Delta append-only, sem regra de negócio
-- **Dados**: 6 tabelas (`cards`, `sets`, `card_prices`, `symbology`, `rulings`, `migrations`), uma por origem da Stage
+- **Dados**: 5 tabelas (`cards`, `sets`, `card_prices`, `rulings`, `migrations`), uma por origem da Stage
 - **Particionamento**: Nenhum (volume atual não justifica)
 - **Preservação**: Schema de origem 1:1, sem dedup nem MERGE/upsert
 - **Documentação de negócio**: [`src/02 - Bronze/Documentação/`](<src/02 - Bronze/Documentação/README.md>) (tabela e coluna, comentado também no Unity Catalog)
@@ -141,7 +141,7 @@ pipeline-databricks-mtg-dev/
 
 ### 4. Gold Layer
 - **Função**: Visão de mercado pronta para consumo direto por analista, BI ou Genie, sem precisar conhecer Bronze/Silver
-- **Dados**: 1 tabela (`TB_FATO_MERCADO_CARTAS`) — combina catálogo de carta, coleção, cotação de preço, esclarecimentos de regras e migrações de ID; 5 das 7 tabelas Silver alimentam a junção (`TB_DOM_SIMBOLOS`/`TB_PONTE_CARTA_SIMBOLOS` têm grão incompatível e ficam de fora)
+- **Dados**: 2 tabelas (`TB_FATO_MERCADO_CARTAS` e a dimensão `TB_DIM_CARTAS` que a alimenta) — combina catálogo de carta, coleção, cotação de preço, esclarecimentos de regras e migrações de ID; usa as 5 tabelas Silver
 - **Grão**: 1 linha por cotação de preço de uma impressão de carta — chave `(ID_CARTA, DT_COTACAO)`
 - **Carga**: Full extract da Silver a cada execução + merge Delta idempotente pela chave, particionada por ano/mês de cotação
 - **Qualidade**: Checagens de PK/FK, valor negativo de preço e nulo residual, auditadas por run em `TB_AUDITORIA_GOLD`
@@ -149,8 +149,8 @@ pipeline-databricks-mtg-dev/
 
 ## CI/CD Pipeline
 
-Dois ambientes no mesmo workspace: **dev** (este repo, catálogo `mtg_dev`, livre
-para experimentar) e **prd** (repo [`pipeline-databricks-mtg-prd`](https://github.com/scudellerlemos/pipeline-databricks-mtg-prd),
+Dois ambientes no mesmo workspace: **dev** (repo [`pipeline-databricks-mtg-dev`](https://github.com/scudellerlemos/pipeline-databricks-mtg-dev),
+catálogo `mtg_dev`, livre para experimentar) e **prd** (repo [`pipeline-databricks-mtg-prd`](https://github.com/scudellerlemos/pipeline-databricks-mtg-prd),
 catálogo `mtg_prod`). O porquê de cada escolha está em [`docs/ADR.md`](docs/ADR.md).
 
 ```
@@ -205,7 +205,6 @@ PR ──▶ CI ──▶ merge na main ──▶ CI + deploy dev ──▶ prom
 - **Cartas**: catálogo completo via bulk-data
 - **Sets**: Todas as expansões
 - **Preços**: Histórico de preços (uma linha por coleta, sem dedup)
-- **Symbology**: Catálogo de símbolos de mana/custo
 - **Rulings**: Esclarecimentos oficiais de regras por carta
 - **Migrations**: Histórico de reconciliação de IDs de carta
 
@@ -243,37 +242,37 @@ Merge na `main` que mexe em código, com o CI verde, deploya em dev e publica em
 ### Cluster Configuration
 
 Definido em `.github/DAGs/{stage,bronze,silver,gold}.yml` — os quatro usam o
-mesmo bloco, e dev e prd usam o mesmo pool:
+mesmo bloco, e dev e prd usam o mesmo cluster:
 
 ```yaml
 spark_version: "15.4.x-scala2.12"
-instance_pool_id: "0925-163505-peep89-pool-mgfqrcwi"
-driver_instance_pool_id: "0925-163505-peep89-pool-mgfqrcwi"
-autoscale:
-  min_workers: 1
-  max_workers: 2
+node_type_id: "m5d.2xlarge"   # 8 vCPU / 32 GB
+num_workers: 0                # single-node: tudo roda no driver
+data_security_mode: "SINGLE_USER"  # obrigatorio: sem ele o single-node fica sem Unity Catalog
+aws_attributes:
+  availability: "ON_DEMAND"
+  zone_id: "us-west-2a"
+custom_tags:
+  ResourceClass: "SingleNode"
 spark_conf:
+  spark.master: "local[*]"
+  spark.databricks.cluster.profile: "singleNode"
   spark.databricks.delta.preview.enabled: "true"
   spark.databricks.delta.optimizeWrite.enabled: "true"
   spark.databricks.delta.autoCompact.enabled: "true"
 ```
 
-O node type (`m5d.large`), a zona (`us-west-2a`) e a disponibilidade (`ON_DEMAND`)
-vêm do instance pool `mtg-pipeline-pool-dbr154`, não do YAML:
+Por que single-node e sem instance pool (medido no run de prd de 27/09/2026):
 
-| Campo do pool | Valor |
-|---|---|
-| `node_type_id` | `m5d.large` |
-| `preloaded_spark_versions` | `15.4.x-scala2.12` |
-| `min_idle_instances` | `0` |
-| `max_capacity` | `6` |
-| `idle_instance_autotermination_minutes` | `10` |
+- O gargalo era o driver: CPU 80-99%, memória ~92% e swap de até 85%
+  (Stage) num m5d.large (2 vCPU / 8 GB), com os workers quase ociosos. O volume
+  (centenas de MB por mês) cabe numa máquina só.
+- O pool antigo (`min_idle_instances: 0`) não reaproveitava instância entre
+  camadas: cada uma levou ~200s para subir mesmo começando segundos depois do fim
+  da anterior. Sem ganho, só mais uma peça de infra.
 
-> **`preloaded_spark_versions` do pool tem que bater com o `spark_version` dos
-> YAMLs.** Se divergir, o cluster baixa e instala o runtime inteiro em cada subida
-> — que é justamente o custo que o pool existe pra eliminar. Esse campo é
-> **imutável depois que o pool é criado**: pra trocar de runtime é preciso criar um
-> pool novo e atualizar o `instance_pool_id` nos quatro YAMLs.
+Se o volume crescer a ponto de não caber em 32 GB, o caminho é voltar a ter
+workers (`num_workers`/`autoscale`) e tirar `spark.master`/`profile`/`ResourceClass`.
 
 ### Schedule
 - **Frequência**: Mensal, 1ª segunda-feira do mês, às 6h (Brasil) — `MTG_PIPELINE` em `.github/DAGs/pipeline.yml`
@@ -282,7 +281,7 @@ vêm do instance pool `mtg-pipeline-pool-dbr154`, não do YAML:
 
 ### Diferenças entre Ambientes
 
-Mesmo código, workspace, pool e secret scope. Dev usa o YAML e o secret scope;
+Mesmo código, workspace, cluster e secret scope. Dev usa o YAML e o secret scope;
 prd sobrescreve via env var `MTG_*` injetada pelo `deploy.py` ([ADR-005](docs/ADR.md#adr-005--dev-e-prd-no-mesmo-workspace-diferença-só-por-env-var)):
 
 | Aspecto | DEV | PRD |

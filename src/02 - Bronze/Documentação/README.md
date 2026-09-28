@@ -23,11 +23,10 @@ Unity Catalog (`{catalog}.bronze.cards`, etc.), o prefixo seria redundante.
 | `cards` | `cards` | [`cards.py`](../Dev/cards.py) | [`src/01 - Ingestion/cards.py`](<../../01 - Ingestion/cards.py>) | [`cards/README.md`](./cards/README.md) |
 | `sets` | `sets` | [`sets.py`](../Dev/sets.py) | [`src/01 - Ingestion/sets.py`](<../../01 - Ingestion/sets.py>) | [`sets/README.md`](./sets/README.md) |
 | `card_prices` | `card_prices` | [`card_prices.py`](../Dev/card_prices.py) | [`src/01 - Ingestion/card_prices.py`](<../../01 - Ingestion/card_prices.py>) | [`card_prices/README.md`](./card_prices/README.md) |
-| `symbology` | `symbology` | [`symbology.py`](../Dev/symbology.py) | [`src/01 - Ingestion/symbology.py`](<../../01 - Ingestion/symbology.py>) | [`symbology/README.md`](./symbology/README.md) |
 | `rulings` | `rulings` | [`rulings.py`](../Dev/rulings.py) | [`src/01 - Ingestion/rulings.py`](<../../01 - Ingestion/rulings.py>) | [`rulings/README.md`](./rulings/README.md) |
 | `migrations` | `migrations` | [`migrations.py`](../Dev/migrations.py) | [`src/01 - Ingestion/migrations.py`](<../../01 - Ingestion/migrations.py>) | [`migrations/README.md`](./migrations/README.md) |
 
-Todas as 6 tabelas têm um `README.md` próprio com a descrição de negócio da
+Todas as 5 tabelas têm um `README.md` próprio com a descrição de negócio da
 tabela (o que é, pra que serve) e a lista completa de colunas específicas
 dela. Os mesmos textos (copiados à mão) comentam a tabela/coluna no
 Unity Catalog (`DESCRIBE TABLE EXTENDED {tabela}` mostra o mesmo conteúdo) -
@@ -60,9 +59,10 @@ se ela não existir. Toda execução segue o mesmo fluxo:
 1. Lista os diretórios `.parquet` com part-file em `{caminho_s3_stage}/{nome_tabela_stage}/` (ignora escrita não commitada).
 2. Descobre quais já foram carregados (via `source_file` distinto já presente na Bronze).
 3. Lê só os arquivos novos, adiciona as 3 colunas técnicas.
-4. Append no Delta com `mergeSchema=true` (evolução aditiva de schema).
-5. Garante a tabela no Unity Catalog (`CREATE TABLE ... LOCATION` só se ela não existir, nunca `DROP`) e aplica `COMMENT ON TABLE`/`ALTER COLUMN ... COMMENT` (só metadado) em toda execução.
-6. Grava o controle de execução em `{caminho_s3_bronze}/_control/{tabela}/{run_id}.json`.
+4. Valida o contrato de schema (`validar_contrato_esquema` em base_utils): coluna nova entra com aviso; coluna removida, tipo alterado ou coluna fora do `bronze_column_docs` aborta sem gravar. Mudança intencional: `permitir_quebra_esquema=True` no notebook.
+5. Append no Delta com `mergeSchema=true`.
+6. Garante a tabela no Unity Catalog (`CREATE TABLE ... LOCATION` só se ela não existir, nunca `DROP`) e aplica `COMMENT ON TABLE`/`ALTER COLUMN ... COMMENT` (só metadado) em toda execução.
+7. Grava o controle de execução em `{caminho_s3_bronze}/_control/{tabela}/{run_id}.json`.
 
 Se não há arquivo novo (ex.: 2ª execução no mesmo dia - a Stage pula a
 escrita porque o nome do arquivo já carrega a data da execução), a run fecha como `SUCCESS` sem escrever nada -
